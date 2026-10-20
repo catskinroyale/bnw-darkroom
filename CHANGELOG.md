@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-20
+
 ### Added
 - **Camera raw support** (`crates/bw-raw`): Nikon NEF, DNG (including Leica M Monochrom)
   and Sony ARW, decoded with LightCraft's `lightcraft-raw` (MIT OR Apache-2.0, pinned to
@@ -74,5 +76,6 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/49d00c7...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/catskinroyale/bnw-darkroom/compare/49d00c7...v0.2.0
 [0.1.0]: https://github.com/catskinroyale/bnw-darkroom/commit/49d00c7
