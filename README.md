@@ -17,7 +17,8 @@ interact through a simulated negative; printing is a separate stage on that nega
 | `crates/bw-negative` | Negative simulation: exposure, development, adjacency, grain; development-time table |
 | `crates/bw-darkroom` | Minimal printing |
 | `crates/bw-profiles` | Styles (film + developer + process + print) |
-| `crates/bw-io` | Image loading and export |
+| `crates/bw-io` | Image loading and export (TIFF, JPEG, PNG) |
+| `crates/bw-raw` | Camera raw input (NEF, DNG, ARW) via LightCraft's `lightcraft-raw`; exposure, white balance, highlights |
 | `apps/bw-cli` | `bw` command-line tool (`bw variations`) |
 | `apps/bw-desktop` | `bw-darkroom` desktop app (egui) |
 | `data/development` | Development times: raw Massive Dev Chart extract and the curated table |
@@ -33,6 +34,9 @@ cargo test --release                            # all tests
 cargo run --release -p bw-desktop -- ~/Pictures # desktop app (optional folder or image)
 cargo run --release -p bw-cli -- variations --input chart --out out/chart
 ```
+
+Nikon High Efficiency (HE/HE★) NEFs are not supported; use lossless compressed NEF.
+Set `BW_RAW_SAMPLE=/path/to/file.NEF` to include a real raw file in `cargo test`.
 
 After editing `data/development/mdc-times.csv`, run `python3 -I tools/curate_times.py`.
 

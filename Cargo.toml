@@ -15,6 +15,12 @@ proptest = "1"
 image = { version = "0.25", default-features = false, features = ["png", "tiff", "jpeg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Raw decoding from LightCraft (MIT OR Apache-2.0, pure Rust), pinned to the commit reviewed
+# on 2026-10-20. Not published on crates.io; bump the rev deliberately and re-run the raw tests.
+lightcraft-raw = { git = "https://github.com/storytold/lightcraft", rev = "d999e382bafbb5d5c54482fdb1d11f6a63bfdf69", default-features = false }
+lightcraft-color = { git = "https://github.com/storytold/lightcraft", rev = "d999e382bafbb5d5c54482fdb1d11f6a63bfdf69" }
+lightcraft-raster = { git = "https://github.com/storytold/lightcraft", rev = "d999e382bafbb5d5c54482fdb1d11f6a63bfdf69" }
+lightcraft-geom = { git = "https://github.com/storytold/lightcraft", rev = "d999e382bafbb5d5c54482fdb1d11f6a63bfdf69" }
 
 [profile.release]
 debug = 1

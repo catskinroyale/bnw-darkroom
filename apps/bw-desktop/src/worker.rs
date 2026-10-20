@@ -1,22 +1,27 @@
 //! Background rendering.
 //!
-//! One render thread owns the decoded image and serves jobs in priority order:
+//! One render thread owns the opened image and serves jobs in priority order:
 //! load, preview, detail (1:1) view, then style-gallery tiles. Newer requests of the
 //! same kind replace older ones, so dragging a slider never builds a queue.
 //! Exports run on their own threads so they never block previews.
 //!
-//! Every render takes the film format and enlargement from its style, so grain and
-//! edge effects are scaled to the film area each pixel covers.
+//! Every job carries the image's adjustments (exposure, white balance, …) and its
+//! style; the film format and enlargement come from the style, so grain and edge
+//! effects are scaled to the film area each pixel covers.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 use bw_negative::SceneImage;
 use bw_profiles::{ExportRecord, Style};
+use bw_raw::RawAdjust;
 use eframe::egui;
+
+use crate::export::{Conflict, Format, resolve_conflict};
+use crate::source::Source;
 
 /// Long edge of style-gallery tiles.
 pub const TILE_EDGE: usize = 360;
@@ -32,24 +37,26 @@ pub enum Job {
     Preview {
         generation: u64,
         style: Style,
+        adjust: RawAdjust,
         edge: usize,
     },
     Detail {
         generation: u64,
         style: Style,
+        adjust: RawAdjust,
         centre: [f32; 2],
     },
     Tiles {
         generation: u64,
         styles: Vec<Style>,
+        adjust: RawAdjust,
     },
 }
 
 pub enum Msg {
     Loaded {
         generation: u64,
-        full: Arc<SceneImage>,
-        original: egui::ColorImage,
+        source: Arc<Source>,
     },
     LoadFailed {
         generation: u64,
@@ -58,6 +65,8 @@ pub enum Msg {
     Preview {
         generation: u64,
         image: egui::ColorImage,
+        /// The adjusted colour image, sent when the adjustments or size changed.
+        original: Option<egui::ColorImage>,
         millis: u128,
     },
     Detail {
@@ -81,6 +90,7 @@ pub enum Msg {
         image: egui::ColorImage,
     },
     Exported {
+        /// The file written.
         tiff: PathBuf,
         millis: u128,
     },
@@ -89,28 +99,70 @@ pub enum Msg {
     },
 }
 
+/// The opened image and scenes derived from it, each cached with the settings it was
+/// made for.
 struct Current {
-    full: Arc<SceneImage>,
-    /// Downscaled copy for the preview, and the edge it was made for.
-    preview: Option<(usize, SceneImage)>,
-    tile: SceneImage,
+    full: Arc<Source>,
+    /// Reduced copy for previews, and the edge it was made for.
+    preview_source: Option<(usize, Source)>,
+    /// Adjusted preview scene, keyed by edge and adjustments.
+    preview_scene: Option<(usize, RawAdjust, SceneImage)>,
+    tile_source: Source,
+    tile_scene: Option<(RawAdjust, SceneImage)>,
+    /// Adjusted full-resolution scene for the detail view.
+    full_scene: Option<(RawAdjust, SceneImage)>,
 }
 
 impl Current {
-    fn preview_at(&mut self, edge: usize) -> &SceneImage {
-        if self.preview.as_ref().is_none_or(|(e, _)| *e != edge) {
-            self.preview = Some((edge, bw_io::downscale(&self.full, edge)));
+    fn new(full: Arc<Source>) -> Self {
+        let tile_source = full.downscaled(TILE_EDGE);
+        Self {
+            full,
+            preview_source: None,
+            preview_scene: None,
+            tile_source,
+            tile_scene: None,
+            full_scene: None,
         }
-        &self.preview.as_ref().expect("just set").1
+    }
+
+    /// The adjusted preview scene and whether it was just (re)made.
+    fn preview(&mut self, edge: usize, adjust: &RawAdjust) -> (&SceneImage, bool) {
+        if self.preview_source.as_ref().is_none_or(|(e, _)| *e != edge) {
+            self.preview_source = Some((edge, self.full.downscaled(edge)));
+        }
+        let fresh = self
+            .preview_scene
+            .as_ref()
+            .is_none_or(|(e, a, _)| *e != edge || a != adjust);
+        if fresh {
+            let source = &self.preview_source.as_ref().expect("just set").1;
+            self.preview_scene = Some((edge, *adjust, source.develop(adjust)));
+        }
+        (&self.preview_scene.as_ref().expect("just set").2, fresh)
+    }
+
+    fn tile(&mut self, adjust: &RawAdjust) -> &SceneImage {
+        if self.tile_scene.as_ref().is_none_or(|(a, _)| a != adjust) {
+            self.tile_scene = Some((*adjust, self.tile_source.develop(adjust)));
+        }
+        &self.tile_scene.as_ref().expect("just set").1
+    }
+
+    fn full(&mut self, adjust: &RawAdjust) -> &SceneImage {
+        if self.full_scene.as_ref().is_none_or(|(a, _)| a != adjust) {
+            self.full_scene = Some((*adjust, self.full.develop(adjust)));
+        }
+        &self.full_scene.as_ref().expect("just set").1
     }
 }
 
 #[derive(Default)]
 struct Pending {
     load: Option<(u64, PathBuf)>,
-    preview: Option<(u64, Style, usize)>,
-    detail: Option<(u64, Style, [f32; 2])>,
-    tiles: VecDeque<(u64, usize, Style)>,
+    preview: Option<(u64, Style, RawAdjust, usize)>,
+    detail: Option<(u64, Style, RawAdjust, [f32; 2])>,
+    tiles: VecDeque<(u64, usize, Style, RawAdjust)>,
 }
 
 impl Pending {
@@ -131,18 +183,24 @@ impl Pending {
             Job::Preview {
                 generation,
                 style,
+                adjust,
                 edge,
-            } => self.preview = Some((generation, style, edge)),
+            } => self.preview = Some((generation, style, adjust, edge)),
             Job::Detail {
                 generation,
                 style,
+                adjust,
                 centre,
-            } => self.detail = Some((generation, style, centre)),
-            Job::Tiles { generation, styles } => {
+            } => self.detail = Some((generation, style, adjust, centre)),
+            Job::Tiles {
+                generation,
+                styles,
+                adjust,
+            } => {
                 self.tiles = styles
                     .into_iter()
                     .enumerate()
-                    .map(|(i, s)| (generation, i, s))
+                    .map(|(i, s)| (generation, i, s, adjust))
                     .collect();
             }
         }
@@ -154,6 +212,11 @@ fn gray_image(plane: &bw_core::Plane) -> egui::ColorImage {
         [plane.width(), plane.height()],
         &bw_io::plane_to_srgb_gray8(plane),
     )
+}
+
+fn colour_image(scene: &SceneImage) -> egui::ColorImage {
+    let (w, h, px) = bw_io::scene_to_srgb_rgba(scene);
+    egui::ColorImage::from_rgba_unmultiplied([w, h], &px)
 }
 
 /// Render `scene`, which shows the whole frame `style` describes.
@@ -179,47 +242,39 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                 }
 
                 let msg = if let Some((generation, path)) = pending.load.take() {
-                    match bw_io::load_scene(&path, bw_io::Encoding::Auto) {
-                        Ok(full) => {
-                            let small = bw_io::downscale(&full, 1600);
-                            let tile = bw_io::downscale(&small, TILE_EDGE);
-                            let (w, h, px) = bw_io::scene_to_srgb_rgba(&small);
-                            let full = Arc::new(full);
-                            current = Some(Current {
-                                full: full.clone(),
-                                preview: Some((1600, small)),
-                                tile,
-                            });
-                            Msg::Loaded {
-                                generation,
-                                full,
-                                original: egui::ColorImage::from_rgba_unmultiplied([w, h], &px),
-                            }
+                    match Source::open(&path) {
+                        Ok(source) => {
+                            let source = Arc::new(source);
+                            current = Some(Current::new(source.clone()));
+                            Msg::Loaded { generation, source }
                         }
-                        Err(e) => {
+                        Err(error) => {
                             current = None;
-                            Msg::LoadFailed {
-                                generation,
-                                error: e.to_string(),
-                            }
+                            Msg::LoadFailed { generation, error }
                         }
                     }
-                } else if let Some((generation, style, edge)) = pending.preview.take() {
+                } else if let Some((generation, style, adjust, edge)) = pending.preview.take() {
                     let Some(cur) = current.as_mut() else {
                         continue;
                     };
                     let start = Instant::now();
-                    match render_whole(cur.preview_at(edge), &style) {
+                    let (scene, fresh) = cur.preview(edge, &adjust);
+                    let original = fresh.then(|| colour_image(scene));
+                    match render_whole(scene, &style) {
                         Ok(r) => Msg::Preview {
                             generation,
                             image: gray_image(&r.print),
+                            original,
                             millis: start.elapsed().as_millis(),
                         },
                         Err(error) => Msg::RenderFailed { error },
                     }
-                } else if let Some((generation, style, centre)) = pending.detail.take() {
-                    let Some(cur) = &current else { continue };
-                    let (w, h) = cur.full.dimensions();
+                } else if let Some((generation, style, adjust, centre)) = pending.detail.take() {
+                    let Some(cur) = current.as_mut() else {
+                        continue;
+                    };
+                    let full = cur.full(&adjust);
+                    let (w, h) = full.dimensions();
                     let cx = (centre[0] * w as f32) as usize;
                     let cy = (centre[1] * h as f32) as usize;
                     let x = cx
@@ -228,7 +283,7 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                     let y = cy
                         .saturating_sub(DETAIL_SIZE / 2)
                         .min(h.saturating_sub(DETAIL_SIZE));
-                    let crop = bw_io::crop(&cur.full, x, y, DETAIL_SIZE, DETAIL_SIZE);
+                    let crop = bw_io::crop(full, x, y, DETAIL_SIZE, DETAIL_SIZE);
                     // The crop spans its share of the frame, so grain and edge effects
                     // are rendered at the full-resolution scale.
                     let crop_mm = style.frame_width_mm() * crop.dimensions().0 as f64 / w as f64;
@@ -241,9 +296,11 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                             error: e.to_string(),
                         },
                     }
-                } else if let Some((generation, index, style)) = pending.tiles.pop_front() {
-                    let Some(cur) = &current else { continue };
-                    match render_whole(&cur.tile, &style) {
+                } else if let Some((generation, index, style, adjust)) = pending.tiles.pop_front() {
+                    let Some(cur) = current.as_mut() else {
+                        continue;
+                    };
+                    match render_whole(cur.tile(&adjust), &style) {
                         Ok(r) => Msg::Tile {
                             generation,
                             index,
@@ -263,68 +320,69 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
         .expect("spawn render thread");
 }
 
-/// File-name-safe version of a style name.
-fn slug(name: &str) -> String {
-    let mut s: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    while s.contains("--") {
-        s = s.replace("--", "-");
-    }
-    s.trim_matches('-').to_string()
+/// Everything one export needs; the file name is already resolved from the template.
+pub struct ExportJob {
+    pub source: Arc<Source>,
+    pub source_path: PathBuf,
+    pub style: Style,
+    pub adjust: RawAdjust,
+    /// Output path before the conflict policy is applied.
+    pub target: PathBuf,
+    pub format: Format,
+    pub jpeg_quality: u8,
+    pub conflict: Conflict,
+    pub long_edge: Option<u32>,
+    pub write_recipe: bool,
 }
 
-/// First `stem__slug[-n].tif` that does not exist yet.
-fn unique_path(dir: &Path, stem: &str, style: &str) -> PathBuf {
-    let base = format!("{stem}__{}", slug(style));
-    let candidate = dir.join(format!("{base}.tif"));
-    if !candidate.exists() {
-        return candidate;
-    }
-    (2..)
-        .map(|i| dir.join(format!("{base}-{i}.tif")))
-        .find(|p| !p.exists())
-        .expect("unbounded search")
+/// The recipe sits next to the image as `<file name>.json` (`print.jpg.json`), so a
+/// JPEG and a TIFF of the same name keep separate recipes.
+pub fn recipe_path(image: &std::path::Path) -> PathBuf {
+    let mut name = image.file_name().unwrap_or_default().to_os_string();
+    name.push(".json");
+    image.with_file_name(name)
 }
 
-/// Render at full resolution and write a 16-bit TIFF plus a JSON recipe sidecar.
-pub fn spawn_export(
-    full: Arc<SceneImage>,
-    source: PathBuf,
-    style: Style,
-    dir: PathBuf,
-    tx: Sender<Msg>,
-    ctx: egui::Context,
-) {
+/// Develop and render at full resolution, then write the image (and its JSON recipe).
+pub fn spawn_export(job: ExportJob, tx: Sender<Msg>, ctx: egui::Context) {
     std::thread::Builder::new()
         .name("export".into())
         .spawn(move || {
             let start = Instant::now();
             let result = (|| -> Result<PathBuf, String> {
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-                let rendered = render_whole(&full, &style)?;
-                let stem = source
-                    .file_stem()
-                    .map_or("image".into(), |s| s.to_string_lossy().into_owned());
-                let tiff = unique_path(&dir, &stem, &style.name);
-                bw_io::save_print_tiff16(&rendered.print, &tiff).map_err(|e| e.to_string())?;
-                let record = ExportRecord::new(
-                    source.display().to_string(),
-                    &style,
-                    style.frame_width_mm(),
-                    &rendered,
-                );
-                std::fs::write(tiff.with_extension("json"), record.to_json())
-                    .map_err(|e| e.to_string())?;
-                Ok(tiff)
+                if let Some(dir) = job.target.parent() {
+                    std::fs::create_dir_all(dir)
+                        .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+                }
+                let scene = job.source.develop(&job.adjust);
+                let rendered = render_whole(&scene, &job.style)?;
+                drop(scene);
+                let print = match job.long_edge {
+                    Some(edge) => bw_io::resize_long_edge(&rendered.print, edge as usize),
+                    None => rendered.print.clone(),
+                };
+                let path = resolve_conflict(job.target.clone(), job.conflict);
+                match job.format {
+                    Format::Jpeg => bw_io::save_print_jpeg(&print, &path, job.jpeg_quality),
+                    Format::Png16 => bw_io::save_print_png16(&print, &path),
+                    Format::Tiff16 | Format::SameAsOriginal => {
+                        bw_io::save_print_tiff16(&print, &path)
+                    }
+                }
+                .map_err(|e| e.to_string())?;
+                if job.write_recipe {
+                    let mut record = ExportRecord::new(
+                        job.source_path.display().to_string(),
+                        &job.style,
+                        job.style.frame_width_mm(),
+                        &rendered,
+                    );
+                    record.image_adjustments = serde_json::to_value(job.adjust).ok();
+                    record.camera = job.source.capture().map(|c| c.summary());
+                    std::fs::write(recipe_path(&path), record.to_json())
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(path)
             })();
             let msg = match result {
                 Ok(tiff) => Msg::Exported {
@@ -342,48 +400,79 @@ pub fn spawn_export(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
-    #[test]
-    fn export_writes_tiff_and_recipe() {
-        let dir = std::env::temp_dir().join(format!("bw-export-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn job(dir: &Path, format: Format, conflict: Conflict) -> ExportJob {
         let scene = SceneImage::Mono {
             y: bw_core::Plane::from_fn(96, 64, |x, y| 0.01 + (x + y) as f32 / 160.0).unwrap(),
         };
-        let style = bw_profiles::builtin_styles().remove(0);
-        let (tx, rx) = std::sync::mpsc::channel();
-        let source = PathBuf::from("/photos/frame 01.tif");
-        for _ in 0..2 {
-            spawn_export(
-                Arc::new(scene.clone()),
-                source.clone(),
-                style.clone(),
-                dir.clone(),
-                tx.clone(),
-                egui::Context::default(),
-            );
-            match rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap() {
-                Msg::Exported { tiff, .. } => {
-                    let img = image::open(&tiff).unwrap();
-                    assert_eq!((img.width(), img.height()), (96, 64));
-                    assert!(matches!(img, image::DynamicImage::ImageLuma16(_)));
-                    let json = std::fs::read_to_string(tiff.with_extension("json")).unwrap();
-                    assert!(json.contains("\"film\": \"tri-x\""));
-                }
-                Msg::ExportFailed { error } => panic!("{error}"),
-                _ => panic!("unexpected message"),
-            }
+        ExportJob {
+            source: Arc::new(Source::Raster(scene)),
+            source_path: PathBuf::from("/photos/frame 01.tif"),
+            style: bw_profiles::builtin_styles().remove(0),
+            adjust: RawAdjust {
+                rotation: 1,
+                ..Default::default()
+            },
+            target: dir.join(format!("out.{}", format.extension())),
+            format,
+            jpeg_quality: 80,
+            conflict,
+            long_edge: None,
+            write_recipe: true,
         }
-        // The second export must not overwrite the first.
-        let stem = format!("frame 01__{}", slug(&style.name));
-        assert!(dir.join(format!("{stem}.tif")).exists());
-        assert!(dir.join(format!("{stem}-2.tif")).exists());
-        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn run(job: ExportJob) -> PathBuf {
+        let (tx, rx) = std::sync::mpsc::channel();
+        spawn_export(job, tx, egui::Context::default());
+        match rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap() {
+            Msg::Exported { tiff, .. } => tiff,
+            Msg::ExportFailed { error } => panic!("{error}"),
+            _ => panic!("unexpected message"),
+        }
     }
 
     #[test]
-    fn slugs_are_filename_safe() {
-        assert_eq!(slug("Tri-X · D-76, normal"), "tri-x-d-76-normal");
-        assert_eq!(slug("Rodinal 1+100 stand"), "rodinal-1-100-stand");
+    fn exports_each_format_with_recipe_and_conflict_policy() {
+        let dir = std::env::temp_dir().join(format!("bw-export-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let tiff = run(job(&dir, Format::Tiff16, Conflict::AddSuffix));
+        let img = image::open(&tiff).unwrap();
+        assert_eq!(
+            (img.width(), img.height()),
+            (64, 96),
+            "rotated a quarter turn"
+        );
+        assert!(matches!(img, image::DynamicImage::ImageLuma16(_)));
+        let json = std::fs::read_to_string(recipe_path(&tiff)).unwrap();
+        assert!(json.contains("\"film\": \"tri-x\"") && json.contains("\"rotation\": 1"));
+
+        let jpg = run(job(&dir, Format::Jpeg, Conflict::AddSuffix));
+        assert!(matches!(
+            image::open(&jpg).unwrap(),
+            image::DynamicImage::ImageLuma8(_)
+        ));
+
+        // A second export to the same name: suffix, or overwrite.
+        assert_eq!(
+            run(job(&dir, Format::Jpeg, Conflict::AddSuffix)),
+            dir.join("out-2.jpg")
+        );
+        assert_eq!(
+            run(job(&dir, Format::Jpeg, Conflict::Overwrite)),
+            dir.join("out.jpg")
+        );
+
+        let mut small = job(&dir, Format::Png16, Conflict::Overwrite);
+        small.long_edge = Some(48);
+        small.write_recipe = false;
+        let png = run(small);
+        let img = image::open(&png).unwrap();
+        assert_eq!(img.width().max(img.height()), 48);
+        assert!(!recipe_path(&png).exists());
+        assert!(recipe_path(&jpg).exists() && recipe_path(&tiff).exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

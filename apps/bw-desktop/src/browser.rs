@@ -18,18 +18,19 @@ pub fn list_folder(folder: &Path) -> Vec<Entry> {
     let Ok(read) = std::fs::read_dir(folder) else {
         return Vec::new();
     };
-    let mut entries: Vec<Entry> = read
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let path = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                return None;
-            }
-            let is_dir = path.is_dir();
-            (is_dir || bw_io::is_supported_image(&path)).then_some(Entry { path, name, is_dir })
-        })
-        .collect();
+    let mut entries: Vec<Entry> =
+        read.filter_map(Result::ok)
+            .filter_map(|e| {
+                let path = e.path();
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') {
+                    return None;
+                }
+                let is_dir = path.is_dir();
+                (is_dir || bw_io::is_supported_image(&path) || bw_raw::is_raw(&path))
+                    .then_some(Entry { path, name, is_dir })
+            })
+            .collect();
     entries.sort_by(|a, b| {
         b.is_dir
             .cmp(&a.is_dir)
@@ -67,7 +68,13 @@ pub fn spawn_thumbnailer(rx: Receiver<ThumbRequest>, tx: Sender<Msg>, ctx: egui:
                 let Some(path) = req.paths.pop() else {
                     continue;
                 };
-                if let Ok((w, h, px)) = bw_io::load_thumbnail(&path, THUMB_EDGE) {
+                // Raw files: the camera's embedded preview, which is fast and already rendered.
+                let thumb = if bw_raw::is_raw(&path) {
+                    bw_raw::thumbnail(&path, THUMB_EDGE)
+                } else {
+                    bw_io::load_thumbnail(&path, THUMB_EDGE).ok()
+                };
+                if let Some((w, h, px)) = thumb {
                     let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &px);
                     if tx.send(Msg::Thumb { path, image }).is_err() {
                         return;

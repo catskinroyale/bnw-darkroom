@@ -246,6 +246,7 @@ dependencies = [
  "bw-io",
  "bw-negative",
  "bw-profiles",
+ "bw-raw",
  "dirs",
  "eframe",
  "image",
@@ -297,6 +298,24 @@ dependencies = [
  "bw-developer",
  "bw-film",
  "bw-negative",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "bw-raw"
+version = "0.1.0"
+dependencies = [
+ "bw-core",
+ "bw-io",
+ "bw-negative",
+ "image",
+ "lightcraft-color",
+ "lightcraft-geom",
+ "lightcraft-raster",
+ "lightcraft-raw",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1214,6 +1233,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpeg-encoder"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6"
+
+[[package]]
 name = "js-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1268,6 +1293,73 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.9.5",
+]
+
+[[package]]
+name = "lightcraft-color"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "lightcraft-geom",
+ "serde",
+]
+
+[[package]]
+name = "lightcraft-geom"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "lightcraft-meta"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "lightcraft-geom",
+ "lightcraft-tiff",
+ "quick-xml 0.38.4",
+ "serde",
+]
+
+[[package]]
+name = "lightcraft-raster"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "lightcraft-color",
+ "lightcraft-geom",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "lightcraft-raw"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "jpeg-encoder",
+ "lightcraft-color",
+ "lightcraft-geom",
+ "lightcraft-meta",
+ "lightcraft-raster",
+ "lightcraft-tiff",
+ "miniz_oxide 0.8.9",
+ "rayon",
+ "serde",
+ "thiserror 2.0.21",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "lightcraft-tiff"
+version = "0.9.1"
+source = "git+https://github.com/storytold/lightcraft?rev=d999e382bafbb5d5c54482fdb1d11f6a63bfdf69#d999e382bafbb5d5c54482fdb1d11f6a63bfdf69"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1883,6 +1975,15 @@ name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
+
+[[package]]
+name = "quick-xml"
+version = "0.38.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "quick-xml"
@@ -2620,7 +2721,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.41.0",
  "quote",
 ]
 

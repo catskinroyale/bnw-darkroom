@@ -6,6 +6,9 @@
 
 mod app;
 mod browser;
+mod export;
+mod image_panel;
+mod source;
 mod styles;
 mod worker;
 mod workflow;

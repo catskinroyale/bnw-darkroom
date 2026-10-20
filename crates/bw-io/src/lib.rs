@@ -148,6 +148,42 @@ pub fn crop(scene: &SceneImage, x: usize, y: usize, width: usize, height: usize)
     })
 }
 
+/// Mirror left–right, then rotate clockwise by `quarter_turns` × 90°.
+///
+/// Every EXIF orientation is one of these eight combinations; see
+/// `bw_raw::exif_transform` for the mapping.
+pub fn transform(scene: &SceneImage, flip_h: bool, quarter_turns: u8) -> SceneImage {
+    let turns = quarter_turns % 4;
+    if !flip_h && turns == 0 {
+        return scene.clone();
+    }
+    map_planes(scene, |p| {
+        let (w, h) = (p.width(), p.height());
+        let (ow, oh) = if turns % 2 == 1 { (h, w) } else { (w, h) };
+        Plane::from_fn(ow, oh, |ox, oy| {
+            // Output pixel → source pixel of the flipped image, undoing the rotation.
+            let (fx, fy) = match turns {
+                0 => (ox, oy),
+                1 => (oy, h - 1 - ox),
+                2 => (w - 1 - ox, h - 1 - oy),
+                _ => (w - 1 - oy, ox),
+            };
+            let sx = if flip_h { w - 1 - fx } else { fx };
+            p.get(sx, fy)
+        })
+        .expect("non-zero size")
+    })
+}
+
+/// Multiply every channel by `factor` (exposure in linear light).
+pub fn scale(scene: &SceneImage, factor: f32) -> SceneImage {
+    map_planes(scene, |p| {
+        let mut out = p.clone();
+        out.data_mut().par_iter_mut().for_each(|v| *v *= factor);
+        out
+    })
+}
+
 /// Scene-linear image as 8-bit sRGB RGBA for display.
 pub fn scene_to_srgb_rgba(scene: &SceneImage) -> (usize, usize, Vec<u8>) {
     let (w, h) = scene.dimensions();
@@ -209,6 +245,52 @@ pub fn save_print_tiff16(plane: &Plane, path: &Path) -> image::ImageResult<()> {
     buf.save(path)
 }
 
+/// Reflectance as an 8-bit greyscale JPEG (sRGB transfer curve) at `quality` 1–100.
+pub fn save_print_jpeg(plane: &Plane, path: &Path, quality: u8) -> image::ImageResult<()> {
+    let data = plane_to_srgb_gray8(plane);
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(file, quality.clamp(1, 100));
+    encoder.encode(
+        &data,
+        plane.width() as u32,
+        plane.height() as u32,
+        image::ExtendedColorType::L8,
+    )
+}
+
+/// Reflectance as a 16-bit greyscale PNG (sRGB transfer curve).
+pub fn save_print_png16(plane: &Plane, path: &Path) -> image::ImageResult<()> {
+    let data: Vec<u16> = plane
+        .data()
+        .par_iter()
+        .map(|&v| (linear_to_srgb(v) * 65535.0 + 0.5) as u16)
+        .collect();
+    let buf: ImageBuffer<Luma<u16>, Vec<u16>> =
+        ImageBuffer::from_raw(plane.width() as u32, plane.height() as u32, data)
+            .expect("buffer matches dimensions");
+    buf.save_with_format(path, image::ImageFormat::Png)
+}
+
+/// Resample a plane (linear light) so its long edge is `long_edge` pixels, with a
+/// Lanczos filter. Planes already that size or smaller are returned unchanged.
+pub fn resize_long_edge(plane: &Plane, long_edge: usize) -> Plane {
+    let (w, h) = (plane.width(), plane.height());
+    if w.max(h) <= long_edge || long_edge == 0 {
+        return plane.clone();
+    }
+    let scale = long_edge as f64 / w.max(h) as f64;
+    let (nw, nh) = (
+        ((w as f64 * scale).round() as u32).max(1),
+        ((h as f64 * scale).round() as u32).max(1),
+    );
+    let buf: ImageBuffer<Luma<f32>, Vec<f32>> =
+        ImageBuffer::from_raw(w as u32, h as u32, plane.data().to_vec()).expect("buffer matches");
+    let out = image::imageops::resize(&buf, nw, nh, image::imageops::FilterType::Lanczos3);
+    let data = out.into_raw().into_iter().map(|v| v.max(0.0)).collect();
+    Plane::from_vec(nw as usize, nh as usize, data).expect("sizes match")
+}
+
 /// Linear reflectance as a 16-bit TIFF.
 pub fn save_linear_tiff16(plane: &Plane, path: &Path) -> image::ImageResult<()> {
     let data: Vec<u16> = plane
@@ -260,6 +342,60 @@ mod tests {
         assert_eq!((s.width(), s.height()), (25, 15));
         let smean = s.data().iter().sum::<f32>() / s.data().len() as f32;
         assert!((smean - mean).abs() < 1e-3);
+    }
+
+    #[test]
+    fn transform_rotates_and_flips() {
+        // 3×2 image with values 10·y + x.
+        let y = Plane::from_fn(3, 2, |x, y| (10 * y + x) as f32).unwrap();
+        let scene = SceneImage::Mono { y };
+        let get = |s: &SceneImage| match s {
+            SceneImage::Mono { y } => (y.width(), y.height(), y.data().to_vec()),
+            _ => unreachable!(),
+        };
+        // 90° clockwise: the left column (0, 10) becomes the top row reversed (10, 0).
+        assert_eq!(
+            get(&transform(&scene, false, 1)),
+            (2, 3, vec![10.0, 0.0, 11.0, 1.0, 12.0, 2.0])
+        );
+        assert_eq!(
+            get(&transform(&scene, false, 2)),
+            (3, 2, vec![12.0, 11.0, 10.0, 2.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            get(&transform(&scene, true, 0)),
+            (3, 2, vec![2.0, 1.0, 0.0, 12.0, 11.0, 10.0])
+        );
+        // Four quarter turns are the identity.
+        let four = transform(&transform(&scene, false, 3), false, 1);
+        assert_eq!(get(&four), get(&scene));
+    }
+
+    #[test]
+    fn writes_jpeg_and_png_and_resizes() {
+        let dir = std::env::temp_dir().join(format!("bw-io-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plane = Plane::from_fn(300, 200, |x, _| x as f32 / 300.0).unwrap();
+        let small = resize_long_edge(&plane, 150);
+        assert_eq!((small.width(), small.height()), (150, 100));
+        assert_eq!(resize_long_edge(&plane, 1000).width(), 300);
+
+        let (hi, lo) = (dir.join("q95.jpg"), dir.join("q20.jpg"));
+        save_print_jpeg(&plane, &hi, 95).unwrap();
+        save_print_jpeg(&plane, &lo, 20).unwrap();
+        assert!(std::fs::metadata(&hi).unwrap().len() > std::fs::metadata(&lo).unwrap().len());
+        assert!(matches!(
+            image::open(&hi).unwrap(),
+            DynamicImage::ImageLuma8(_)
+        ));
+
+        let png = dir.join("p.png");
+        save_print_png16(&plane, &png).unwrap();
+        assert!(matches!(
+            image::open(&png).unwrap(),
+            DynamicImage::ImageLuma16(_)
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

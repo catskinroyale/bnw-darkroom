@@ -8,18 +8,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use bw_negative::SceneImage;
 use bw_profiles::{ModelSummary, Style};
 use eframe::egui::{self, Color32, Pos2, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 
 use crate::browser::{self, Entry, ThumbRequest};
+use crate::export::{Conflict, ExportSettings, Format, NameContext, TOKENS, resolve_conflict};
+use crate::source::Source;
 use crate::styles::StyleStore;
 use crate::worker::{self, Job, Msg};
 use crate::workflow;
+use bw_raw::RawAdjust;
 
 const KEY_FOLDER: &str = "folder";
 const KEY_VIEW: &str = "workflow_view";
 const KEY_EXPORT_DIR: &str = "export_dir";
+const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
 /// Thumbnail size in browser rows.
 const THUMB_ROW: f32 = 28.0;
@@ -35,7 +38,7 @@ enum Tile {
 
 struct LoadedImage {
     path: PathBuf,
-    full: Arc<SceneImage>,
+    source: Arc<Source>,
 }
 
 pub struct App {
@@ -51,6 +54,10 @@ pub struct App {
     selected: Option<PathBuf>,
     image_generation: u64,
     loaded: Option<LoadedImage>,
+    /// Per-image adjustments (exposure, white balance, …) for the selected image.
+    adjust: RawAdjust,
+    /// `adjust` has changes not yet written to the image's sidecar.
+    adjust_dirty: bool,
     loading: bool,
     original: Option<TextureHandle>,
 
@@ -58,6 +65,8 @@ pub struct App {
     current: usize,
     draft: Style,
     summary: Option<ModelSummary>,
+    /// Display label of the draft's developer, for export file names.
+    developer_label: String,
     /// Workflow panel shows every control rather than the simple chips.
     detailed: bool,
     /// Long edge, in pixels, the preview is rendered at (follows the screen size).
@@ -80,7 +89,9 @@ pub struct App {
     tiles_generation: u64,
     tiles: Vec<Tile>,
 
-    export_dir: Option<PathBuf>,
+    export: ExportSettings,
+    /// The export dialog is open.
+    export_open: bool,
     exports_running: usize,
     status: String,
 
@@ -113,7 +124,13 @@ impl App {
             .or_else(dirs::home_dir)
             .unwrap_or_else(|| PathBuf::from("/"));
         let detailed = get(KEY_VIEW).is_some_and(|v| v == "detailed");
-        let export_dir = get(KEY_EXPORT_DIR).map(PathBuf::from);
+        let export = get(KEY_EXPORT)
+            .and_then(|s| serde_json::from_str::<ExportSettings>(&s).ok())
+            .unwrap_or_else(|| ExportSettings {
+                // carry over the folder chosen before the export dialog existed
+                folder: get(KEY_EXPORT_DIR).map(PathBuf::from),
+                ..Default::default()
+            });
         // Panel visibility as three 0/1 flags: browser, styles, gallery.
         let panels: Vec<bool> = get(KEY_PANELS)
             .map(|s| s.chars().map(|c| c == '1').collect())
@@ -133,12 +150,15 @@ impl App {
             selected: None,
             image_generation: 0,
             loaded: None,
+            adjust: RawAdjust::default(),
+            adjust_dirty: false,
             loading: false,
             original: None,
             tiles: vec![Tile::Pending; store.entries.len()],
             store,
             current: 0,
             summary: draft.model_summary().ok(),
+            developer_label: bw_profiles::developer_label(&draft.developer),
             draft,
             detailed,
             preview_edge: 1600,
@@ -154,7 +174,8 @@ impl App {
             detail_generation: 0,
             detail: None,
             tiles_generation: 0,
-            export_dir,
+            export,
+            export_open: false,
             exports_running: 0,
             status: String::new(),
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
@@ -186,6 +207,8 @@ impl App {
         if self.selected.as_ref() == Some(&path) {
             return;
         }
+        self.save_adjust();
+        self.adjust = crate::source::load_adjust(&path);
         self.image_generation += 1;
         self.selected = Some(path.clone());
         self.loaded = None;
@@ -225,7 +248,28 @@ impl App {
     /// The draft style changed: refresh model summary, preview and detail.
     fn draft_changed(&mut self) {
         self.summary = self.draft.model_summary().ok();
+        self.developer_label = bw_profiles::developer_label(&self.draft.developer);
         self.request_preview();
+    }
+
+    /// Write the selected image's adjustments to its sidecar if they changed.
+    fn save_adjust(&mut self) {
+        if !self.adjust_dirty {
+            return;
+        }
+        if let Some(path) = &self.selected
+            && let Err(e) = crate::source::save_adjust(path, &self.adjust)
+        {
+            self.status = format!("Could not save image adjustments: {e}");
+        }
+        self.adjust_dirty = false;
+    }
+
+    /// The image adjustments changed: re-render everything that shows the image.
+    fn adjust_changed(&mut self) {
+        self.adjust_dirty = true;
+        self.request_preview();
+        self.request_tiles();
     }
 
     fn request_preview(&mut self) {
@@ -237,6 +281,7 @@ impl App {
         let _ = self.jobs.send(Job::Preview {
             generation: self.preview_generation,
             style: self.draft.clone(),
+            adjust: self.adjust,
             edge: self.preview_edge,
         });
         if self.detail_enabled {
@@ -252,6 +297,7 @@ impl App {
         let _ = self.jobs.send(Job::Detail {
             generation: self.detail_generation,
             style: self.draft.clone(),
+            adjust: self.adjust,
             centre: self.detail_centre,
         });
     }
@@ -265,6 +311,7 @@ impl App {
         let _ = self.jobs.send(Job::Tiles {
             generation: self.tiles_generation,
             styles: self.store.styles(),
+            adjust: self.adjust,
         });
     }
 
@@ -320,25 +367,214 @@ impl App {
         }
     }
 
+    /// Values for the file-name template, for the current image and style.
+    fn name_context<'a>(&'a self, source: &'a std::path::Path) -> NameContext<'a> {
+        NameContext {
+            source,
+            style: &self.draft.name,
+            film: self
+                .summary
+                .as_ref()
+                .map_or(&self.draft.film, |m| &m.film_name),
+            developer: &self.developer_label,
+            ei: self.draft.exposure_index,
+            unix_time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        }
+    }
+
     fn export(&mut self, ctx: &egui::Context) {
+        self.save_adjust();
         let Some(loaded) = &self.loaded else { return };
-        let dir = self.export_dir.clone().unwrap_or_else(|| {
-            loaded
-                .path
-                .parent()
-                .map_or_else(|| PathBuf::from("."), |p| p.to_path_buf())
-                .join("bw-exports")
-        });
+        let name = self.export.file_name(&self.name_context(&loaded.path));
+        let target = self.export.folder_for(&loaded.path).join(name);
+        let job = worker::ExportJob {
+            source: loaded.source.clone(),
+            source_path: loaded.path.clone(),
+            style: self.draft.clone(),
+            adjust: self.adjust,
+            target,
+            format: self.export.format.resolve(&loaded.path),
+            jpeg_quality: self.export.jpeg_quality,
+            conflict: self.export.conflict,
+            long_edge: self.export.long_edge,
+            write_recipe: self.export.write_recipe,
+        };
+        if self.export.uses_number() {
+            self.export.next_number += 1;
+        }
         self.exports_running += 1;
-        self.status = format!("Exporting “{}” at full resolution…", self.draft.name);
-        worker::spawn_export(
-            loaded.full.clone(),
-            loaded.path.clone(),
-            self.draft.clone(),
-            dir,
-            self.msg_tx.clone(),
-            ctx.clone(),
-        );
+        self.status = format!("Exporting “{}”…", self.draft.name);
+        worker::spawn_export(job, self.msg_tx.clone(), ctx.clone());
+    }
+
+    fn export_dialog(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.loaded.as_ref().map(|l| l.path.clone()) else {
+            self.export_open = false;
+            return;
+        };
+        let mut open = true;
+        let mut go = false;
+        let mut cancel = false;
+        // Owned copies of the template values, so the dialog can borrow the settings mutably.
+        let (style, film, developer, ei, unix_time) = {
+            let c = self.name_context(&path);
+            (
+                c.style.to_string(),
+                c.film.to_string(),
+                c.developer.to_string(),
+                c.ei,
+                c.unix_time,
+            )
+        };
+        egui::Window::new("Export")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_width(460.0);
+                let e = &mut self.export;
+                egui::Grid::new("export").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+                    ui.label("Format").on_hover_text("File type to save.");
+                    ui.horizontal_wrapped(|ui| {
+                        for f in Format::ALL {
+                            if ui.add(egui::Button::selectable(e.format == f, f.label())).on_hover_text(f.help()).clicked() {
+                                e.format = f;
+                            }
+                        }
+                    });
+                    ui.end_row();
+
+                    let resolved = e.format.resolve(&path);
+                    if resolved == Format::Jpeg {
+                        ui.label("JPEG quality").on_hover_text("Higher keeps more detail and grain structure but makes larger files. 85–95 suits most prints; below 70 grain turns blocky.");
+                        ui.add(egui::Slider::new(&mut e.jpeg_quality, 1..=100))
+                            .on_hover_text("Compression quality, 1–100.");
+                        ui.end_row();
+                    }
+
+                    ui.label("Size").on_hover_text("Full resolution, or resized after rendering so the long edge is this many pixels.");
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.add(egui::Button::selectable(e.long_edge.is_none(), "Full")).on_hover_text("The image's full resolution.").clicked() {
+                            e.long_edge = None;
+                        }
+                        for px in [4096u32, 2048, 1080] {
+                            if ui.add(egui::Button::selectable(e.long_edge == Some(px), px.to_string()))
+                                .on_hover_text(format!("Long edge {px} px."))
+                                .clicked()
+                            {
+                                e.long_edge = Some(px);
+                            }
+                        }
+                        if let Some(px) = &mut e.long_edge {
+                            ui.add(egui::DragValue::new(px).range(64..=20000).suffix(" px"))
+                                .on_hover_text("Custom long edge in pixels.");
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("File name").on_hover_text("Template for the file name. Click a token to add it.");
+                    ui.add(egui::TextEdit::singleline(&mut e.template).desired_width(f32::INFINITY))
+                        .on_hover_text("Template for the file name; the extension is added for you.");
+                    ui.end_row();
+
+                    ui.label("");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        for (token, help) in TOKENS {
+                            if ui.small_button(token).on_hover_text(help).clicked() {
+                                e.template.push_str(token);
+                            }
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Numbering").on_hover_text("The {n} token: a counter that goes up by one after each export.");
+                    ui.horizontal(|ui| {
+                        if e.uses_number() {
+                            ui.label("next");
+                            ui.add(egui::DragValue::new(&mut e.next_number).range(0..=999_999))
+                                .on_hover_text("The number the next export gets.");
+                            ui.label("digits");
+                            ui.add(egui::DragValue::new(&mut e.digits).range(1..=6))
+                                .on_hover_text("Zero padding: 3 digits gives 001, 002, …");
+                        } else if ui.small_button("Add {n}").on_hover_text("Number exports in sequence.").clicked() {
+                            e.template.push_str("_{n}");
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("If file exists").on_hover_text("What to do when a file with that name is already there.");
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::selectable(e.conflict == Conflict::AddSuffix, "Add -2, -3…"))
+                            .on_hover_text("Keep the existing file and add a number to the new one.")
+                            .clicked()
+                        {
+                            e.conflict = Conflict::AddSuffix;
+                        }
+                        if ui.add(egui::Button::selectable(e.conflict == Conflict::Overwrite, "Overwrite"))
+                            .on_hover_text("Replace the existing file.")
+                            .clicked()
+                        {
+                            e.conflict = Conflict::Overwrite;
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Folder").on_hover_text("Where exports are saved.");
+                    ui.horizontal(|ui| {
+                        let label = e.folder.as_ref().map_or("bw-exports next to each image".into(), |d| d.display().to_string());
+                        ui.add(egui::Label::new(egui::RichText::new(label).small()).truncate());
+                        if ui.small_button("Choose…").on_hover_text("Pick a folder for all exports.").clicked()
+                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                        {
+                            e.folder = Some(dir);
+                        }
+                        if e.folder.is_some() && ui.small_button("Next to image").on_hover_text("Save into a bw-exports folder beside each image.").clicked() {
+                            e.folder = None;
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Recipe").on_hover_text("A JSON file with the full workflow, so the print can be reproduced.");
+                    ui.checkbox(&mut e.write_recipe, "Save the recipe (.json) next to the image");
+                    ui.end_row();
+                });
+
+                let name = e.file_name(&NameContext {
+                    source: &path,
+                    style: &style,
+                    film: &film,
+                    developer: &developer,
+                    ei,
+                    unix_time,
+                });
+                let target = resolve_conflict(e.folder_for(&path).join(&name), e.conflict);
+                ui.separator();
+                ui.label(egui::RichText::new("Will save").weak());
+                ui.add(egui::Label::new(egui::RichText::new(target.display().to_string()).monospace().small()).wrap());
+                if target.exists() {
+                    ui.colored_label(ui.visuals().warn_fg_color, "This will replace an existing file.");
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Export").on_hover_text("Render at full quality and save.").clicked() {
+                        go = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if go {
+            self.export(ctx);
+            self.export_open = false;
+        }
+        if !open || cancel {
+            self.export_open = false;
+        }
     }
 
     // ----- messages ------------------------------------------------------------
@@ -346,18 +582,14 @@ impl App {
     fn handle_messages(&mut self, ctx: &egui::Context) {
         while let Ok(msg) = self.msgs.try_recv() {
             match msg {
-                Msg::Loaded {
-                    generation,
-                    full,
-                    original,
-                } if generation == self.image_generation => {
-                    let (w, h) = full.dimensions();
+                Msg::Loaded { generation, source } if generation == self.image_generation => {
                     let path = self.selected.clone().unwrap_or_default();
-                    self.status = format!("{} · {w}×{h}", file_name(&path));
-                    self.loaded = Some(LoadedImage { path, full });
+                    self.status = match source.capture() {
+                        Some(info) => format!("{} · {}", file_name(&path), info.summary()),
+                        None => file_name(&path),
+                    };
+                    self.loaded = Some(LoadedImage { path, source });
                     self.loading = false;
-                    self.original =
-                        Some(ctx.load_texture("original", original, TextureOptions::LINEAR));
                     self.request_preview();
                     self.request_tiles();
                 }
@@ -368,8 +600,12 @@ impl App {
                 Msg::Preview {
                     generation,
                     image,
+                    original,
                     millis,
                 } if generation == self.preview_generation => {
+                    if let Some(original) = original {
+                        set_texture(ctx, &mut self.original, "original", original);
+                    }
                     set_texture(ctx, &mut self.preview, "preview", image);
                     self.preview_ms = Some(millis);
                 }
@@ -421,6 +657,10 @@ impl App {
         let Some((path, started, requested)) = &mut self.screenshot else {
             return;
         };
+        // `BW_DARKROOM_SCREENSHOT_EXPORT=1` also opens the export dialog for the shot.
+        if self.loaded.is_some() && std::env::var_os("BW_DARKROOM_SCREENSHOT_EXPORT").is_some() {
+            self.export_open = true;
+        }
         let rendered = (self.preview.is_some() || self.summary.is_none())
             && !self.tiles.iter().any(|t| matches!(t, Tile::Pending));
         if !*requested && (rendered || started.elapsed().as_secs() > 30) {
@@ -461,27 +701,14 @@ impl App {
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can_export = self.loaded.is_some();
-                let export = ui
-                    .add_enabled(can_export, egui::Button::new("Export print…"))
-                    .on_hover_text(
-                        "Render at full resolution and save a 16-bit TIFF plus a JSON recipe",
-                    );
-                if export.clicked() {
-                    self.export(ui.ctx());
-                }
-                let dir_label = self
-                    .export_dir
-                    .as_ref()
-                    .map_or("Next to image / bw-exports".to_string(), |d| {
-                        d.display().to_string()
-                    });
                 if ui
-                    .button("Export folder…")
-                    .on_hover_text(format!("Export folder: {dir_label}"))
+                    .add_enabled(can_export, egui::Button::new("Export…"))
+                    .on_hover_text(
+                        "Choose format, size and file name, then render at full quality (⌘E)",
+                    )
                     .clicked()
-                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
                 {
-                    self.export_dir = Some(dir);
+                    self.export_open = true;
                 }
                 if self.exports_running > 0 {
                     ui.spinner();
@@ -556,6 +783,20 @@ impl App {
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
+                egui::CollapsingHeader::new(egui::RichText::new("Image").heading())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        let source = self.loaded.as_ref().map(|l| l.source.clone());
+                        if crate::image_panel::show(
+                            ui,
+                            &mut self.adjust,
+                            source.as_deref(),
+                            self.detailed,
+                        ) {
+                            self.adjust_changed();
+                        }
+                    });
+                ui.add_space(4.0);
                 let mut pick = None;
                 egui::CollapsingHeader::new(egui::RichText::new("Styles").heading())
                     .default_open(true)
@@ -880,6 +1121,14 @@ impl eframe::App for App {
         self.show_gallery = show_gallery;
         egui::CentralPanel::default().show(ui, |ui| self.central(ui));
 
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::E))
+            && self.loaded.is_some()
+        {
+            self.export_open = true;
+        }
+        if self.export_open {
+            self.export_dialog(ctx);
+        }
         self.screenshot_hook(ctx);
 
         if self.detail_enabled && self.loaded.is_some() {
@@ -906,6 +1155,7 @@ impl eframe::App for App {
         if self.screenshot.is_some() {
             return; // test runs must not change the user's saved state
         }
+        self.save_adjust();
         storage.set_string(KEY_FOLDER, self.folder.display().to_string());
         storage.set_string(
             KEY_VIEW,
@@ -919,8 +1169,8 @@ impl eframe::App for App {
                 .iter()
                 .collect(),
         );
-        if let Some(dir) = &self.export_dir {
-            storage.set_string(KEY_EXPORT_DIR, dir.display().to_string());
+        if let Ok(json) = serde_json::to_string(&self.export) {
+            storage.set_string(KEY_EXPORT, json);
         }
     }
 }

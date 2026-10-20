@@ -289,6 +289,12 @@ pub struct ExportRecord<'a> {
     pub calibration_level: &'static str,
     pub warnings: Vec<String>,
     pub note: &'static str,
+    /// Per-image adjustments made before development (raw exposure, white balance, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_adjustments: Option<serde_json::Value>,
+    /// Camera and capture settings, for raw sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
 }
 
 impl<'a> ExportRecord<'a> {
@@ -306,6 +312,8 @@ impl<'a> ExportRecord<'a> {
             calibration_level: level,
             warnings: rendered.negative.warnings.clone(),
             note: "Film and developer parameters are illustrative placeholders, not fitted to manufacturer data.",
+            image_adjustments: None,
+            camera: None,
         }
     }
 

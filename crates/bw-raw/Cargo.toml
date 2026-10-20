@@ -1,0 +1,23 @@
+[package]
+name = "bw-raw"
+description = "Camera raw input: decoding, white balance, highlight handling and colour conversion to the engine's scene-linear working space."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }
+bw-negative = { path = "../bw-negative" }
+bw-io = { path = "../bw-io" }
+lightcraft-raw = { workspace = true }
+lightcraft-color = { workspace = true }
+lightcraft-raster = { workspace = true }
+lightcraft-geom = { workspace = true }
+image = { workspace = true }
+rayon.workspace = true
+serde = { workspace = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json = { workspace = true }
