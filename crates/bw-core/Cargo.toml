@@ -1,0 +1,14 @@
+[package]
+name = "bw-core"
+description = "Numerical foundations for the black-and-white emulation engine: planes, film geometry, monotone curves, deterministic noise, filters."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rayon.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

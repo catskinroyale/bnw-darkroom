@@ -1,0 +1,13 @@
+[package]
+name = "bw-io"
+description = "Image loading, resampling and export for the black-and-white emulation engine."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }
+bw-negative = { path = "../bw-negative" }
+image = { workspace = true }
+rayon.workspace = true

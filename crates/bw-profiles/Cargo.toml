@@ -1,0 +1,17 @@
+[package]
+name = "bw-profiles"
+description = "Styles: serialisable compositions of film, developer, processing and printing."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }
+bw-developer = { path = "../bw-developer" }
+bw-film = { path = "../bw-film" }
+bw-negative = { path = "../bw-negative" }
+bw-darkroom = { path = "../bw-darkroom" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror.workspace = true

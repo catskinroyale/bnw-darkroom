@@ -1,0 +1,10 @@
+[package]
+name = "bw-film"
+description = "Film stock definitions: spectral response, emulsion spread and grain parameters."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }

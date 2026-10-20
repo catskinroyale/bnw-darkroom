@@ -1,0 +1,12 @@
+[package]
+name = "bw-darkroom"
+description = "Printing simulation operating on a simulated negative."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }
+bw-negative = { path = "../bw-negative" }
+rayon.workspace = true

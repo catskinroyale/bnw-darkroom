@@ -1,0 +1,10 @@
+[package]
+name = "bw-developer"
+description = "Developer behaviour: film/developer calibrations and processing conditions."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }

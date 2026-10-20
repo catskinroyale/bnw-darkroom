@@ -1,0 +1,239 @@
+# Development times used by the engine: 35 mm, intermittent agitation, normalised to 20 C.
+# Curated by tools/curate_times.py from data/development/mdc-times.csv (Massive Dev Chart via
+# Internet Archive snapshots 2025; see that file for per-row sources and notes). Whole-stop EIs only.
+film,developer,dilution,ei,time_min,temp_c,source
+delta-100,d76,1+1,10,4.50,20,MDC
+delta-100,d76,1+1,50,10.00,20,MDC
+delta-100,d76,1+1,100,11.00,20,MDC
+delta-100,d76,1+1,200,13.00,20,MDC
+delta-100,d76,1+1,400,14.50,20,MDC
+delta-100,d76,stock,50,7.00,20,MDC
+delta-100,d76,stock,100,8.50,20,MDC
+delta-100,d76,stock,200,10.50,20,MDC
+delta-100,d76,stock,800,14.00,20,MDC
+delta-100,d96,stock,100,8.00,20,MDC
+delta-100,fx55,1+9,100,10.00,20,MDC
+delta-100,hc110,B,50,5.00,20,MDC
+delta-100,hc110,B,100,6.00,20,MDC
+delta-100,hc110,B,200,8.00,20,MDC
+delta-100,hc110,B,400,12.00,20,MDC
+delta-100,hc110,E,50,5.50,20,MDC
+delta-100,hc110,E,100,7.50,20,MDC
+delta-100,hc110,E,200,10.00,20,MDC
+delta-100,hc110,G,100,24.00,20,MDC
+delta-100,rodinal,1+25,50,7.00,20,MDC
+delta-100,rodinal,1+25,100,9.00,20,MDC median of 2
+delta-100,rodinal,1+50,50,10.00,20,MDC
+delta-100,rodinal,1+50,100,15.00,20,MDC median of 2
+delta-100,rodinal,1+50,200,18.00,20,MDC
+delta-3200,d76,1+1,400,9.50,20,MDC
+delta-3200,d76,1+1,1000,11.00,20,MDC
+delta-3200,d76,1+1,3200,12.00,20,MDC
+delta-3200,d76,1+1,6400,26.00,20,MDC
+delta-3200,d76,stock,400,7.00,20,MDC
+delta-3200,d76,stock,800,8.00,20,MDC
+delta-3200,d76,stock,1000,8.02,20,MDC
+delta-3200,d76,stock,1600,9.50,20,MDC
+delta-3200,d76,stock,3200,10.50,20,MDC
+delta-3200,d76,stock,6400,13.00,20,MDC
+delta-3200,d76,stock,12500,17.00,20,MDC
+delta-3200,d96,stock,1600,9.00,20,MDC
+delta-3200,d96,stock,3200,10.00,20,MDC
+delta-3200,fx55,1+9,3200,12.50,20,MDC
+delta-3200,hc110,B,400,6.00,20,MDC
+delta-3200,hc110,B,800,7.50,20,MDC
+delta-3200,hc110,B,1600,9.00,20,MDC
+delta-3200,hc110,B,3200,14.50,20,MDC
+delta-3200,rodinal,1+25,400,5.50,20,MDC
+delta-3200,rodinal,1+25,800,7.00,20,MDC
+delta-3200,rodinal,1+25,1000,8.50,20,MDC
+delta-3200,rodinal,1+25,1600,9.00,20,MDC
+delta-3200,rodinal,1+25,3200,11.00,20,MDC
+delta-3200,rodinal,1+25,6400,20.00,20,MDC
+delta-3200,rodinal,1+25,12800,40.00,20,MDC
+delta-400,d76,1+1,200,10.00,20,MDC
+delta-400,d76,1+1,400,14.00,20,MDC
+delta-400,d76,1+1,800,17.50,20,MDC
+delta-400,d76,stock,200,7.00,20,MDC
+delta-400,d76,stock,400,9.50,20,MDC
+delta-400,d76,stock,800,11.50,20,MDC
+delta-400,d76,stock,1600,14.50,20,MDC
+delta-400,d76,stock,3200,19.00,20,MDC
+delta-400,fx55,1+9,400,12.50,20,MDC
+delta-400,hc110,B,100,4.50,20,MDC
+delta-400,hc110,B,200,5.00,20,MDC
+delta-400,hc110,B,400,7.50,20,MDC
+delta-400,hc110,B,800,10.00,20,MDC
+delta-400,hc110,B,1600,13.50,20,MDC
+delta-400,rodinal,1+25,100,5.50,20,MDC
+delta-400,rodinal,1+25,200,6.50,20,MDC
+delta-400,rodinal,1+25,400,8.50,20,MDC median of 2
+delta-400,rodinal,1+25,800,20.72,20,MDC median of 2
+delta-400,rodinal,1+25,3200,40.00,20,MDC
+delta-400,rodinal,1+50,200,11.00,20,MDC
+delta-400,rodinal,1+50,400,19.00,20,MDC median of 2
+double-x,d76,1+1,250,10.00,20,MDC
+double-x,d76,1+1,400,13.50,20,MDC
+double-x,d76,1+1,800,21.50,20,MDC median of 3
+double-x,d76,stock,64,3.57,20,MDC
+double-x,d76,stock,100,4.25,20,MDC
+double-x,d76,stock,250,6.77,20,MDC median of 2
+double-x,d76,stock,400,9.00,20,MDC
+double-x,d76,stock,800,13.50,20,MDC
+double-x,d76,stock,1600,18.00,20,MDC
+double-x,d96,stock,250,7.64,20,MDC
+double-x,d96,stock,400,8.00,20,MDC
+double-x,d96,stock,1600,25.00,20,MDC
+double-x,d96,stock,3200,32.73,20,MDC median of 2
+double-x,hc110,B,64,3.65,20,MDC
+double-x,hc110,B,100,4.00,20,MDC
+double-x,hc110,B,250,6.00,20,MDC
+double-x,hc110,B,400,6.50,20,MDC
+double-x,hc110,B,800,12.50,20,MDC
+double-x,hc110,B,1600,20.00,20,MDC
+double-x,hc110,B,3200,23.00,20,MDC
+double-x,hc110,E,200,8.00,20,MDC
+double-x,hc110,E,400,10.00,20,MDC
+double-x,hc110,H,400,14.00,20,MDC
+double-x,rodinal,1+100,25,3.00,20,MDC
+double-x,rodinal,1+25,250,5.75,20,MDC
+double-x,rodinal,1+25,500,7.50,20,MDC
+double-x,rodinal,1+25,1000,9.25,20,MDC
+double-x,rodinal,1+50,250,9.00,20,MDC
+double-x,rodinal,1+50,400,11.00,20,MDC
+double-x,rodinal,1+50,800,15.52,20,MDC median of 2
+fp4,d76,1+1,50,8.00,20,MDC
+fp4,d76,1+1,125,11.00,20,MDC
+fp4,d76,1+1,200,15.00,20,MDC
+fp4,d76,1+1,400,18.00,20,MDC
+fp4,d76,stock,50,6.50,20,MDC
+fp4,d76,stock,125,8.50,20,MDC
+fp4,d76,stock,200,10.00,20,MDC
+fp4,d76,stock,400,12.00,20,MDC
+fp4,d96,stock,125,8.00,20,MDC
+fp4,fx55,1+9,125,8.50,20,MDC
+fp4,hc110,B,50,6.00,20,MDC
+fp4,hc110,B,125,8.00,20,MDC
+fp4,hc110,B,200,12.00,20,MDC
+fp4,hc110,B,400,17.00,20,MDC
+fp4,hc110,B,800,24.00,20,MDC
+fp4,hc110,E,125,9.86,20,MDC
+fp4,hc110,E,500,37.00,20,MDC
+fp4,hc110,G,65,14.00,20,MDC
+fp4,hc110,G,125,18.00,20,MDC
+fp4,hc110,H,125,18.00,20,MDC
+fp4,rodinal,1+100,125,20.00,20,MDC
+fp4,rodinal,1+25,25,4.00,20,MDC
+fp4,rodinal,1+25,125,8.50,20,MDC median of 2
+fp4,rodinal,1+25,200,13.00,20,MDC
+fp4,rodinal,1+25,800,35.00,20,MDC
+fp4,rodinal,1+50,50,7.50,20,MDC
+fp4,rodinal,1+50,125,15.00,20,MDC median of 3
+fp4,rodinal,1+50,250,26.00,20,MDC
+hp5,d76,1+1,100,6.00,20,MDC
+hp5,d76,1+1,400,13.00,20,MDC
+hp5,d76,1+1,800,16.50,20,MDC
+hp5,d76,1+1,1600,18.00,20,MDC
+hp5,d76,1+1,3200,25.00,20,MDC
+hp5,d76,stock,200,6.75,20,MDC
+hp5,d76,stock,400,7.50,20,MDC
+hp5,d76,stock,800,10.50,20,MDC
+hp5,d76,stock,1600,14.00,20,MDC
+hp5,d96,stock,400,7.50,20,MDC
+hp5,fx55,1+9,400,13.50,20,MDC
+hp5,fx55,stock,640,16.41,20,MDC
+hp5,hc110,B,400,5.00,20,MDC
+hp5,hc110,B,800,7.50,20,MDC
+hp5,hc110,B,1600,11.00,20,MDC
+hp5,hc110,B,3200,16.00,20,MDC
+hp5,hc110,E,400,7.50,20,MDC
+hp5,hc110,H,100,7.17,20,MDC
+hp5,hc110,H,200,8.82,20,MDC
+hp5,hc110,H,400,11.87,20,MDC median of 2
+hp5,rodinal,1+100,400,16.00,20,MDC
+hp5,rodinal,1+25,200,5.00,20,MDC
+hp5,rodinal,1+25,400,6.00,20,MDC
+hp5,rodinal,1+25,800,8.00,20,MDC
+hp5,rodinal,1+25,1600,12.00,20,MDC
+hp5,rodinal,1+25,3200,19.70,20,MDC
+hp5,rodinal,1+50,25,7.00,20,MDC
+hp5,rodinal,1+50,100,9.00,20,MDC
+hp5,rodinal,1+50,200,11.50,20,MDC
+hp5,rodinal,1+50,400,13.00,20,MDC median of 2
+hp5,rodinal,1+50,800,16.00,20,MDC
+hp5,rodinal,1+50,1600,24.00,20,MDC
+hp5,rodinal,1+50,6400,69.00,20,MDC median of 2
+tmax-100,d76,1+1,100,9.50,20,MDC
+tmax-100,d76,stock,100,6.50,20,MDC
+tmax-100,d76,stock,200,6.50,20,MDC
+tmax-100,d76,stock,400,8.25,20,MDC
+tmax-100,d96,stock,100,7.50,20,MDC
+tmax-100,fx55,1+9,100,13.00,20,MDC
+tmax-100,hc110,B,100,6.00,20,MDC
+tmax-100,hc110,B,200,6.00,20,MDC
+tmax-100,hc110,B,400,11.50,20,MDC
+tmax-100,hc110,H,100,12.00,20,MDC
+tmax-100,rodinal,1+100,64,15.00,20,MDC
+tmax-100,rodinal,1+100,100,60.00,20,MDC
+tmax-100,rodinal,1+100,1600,94.10,20,MDC
+tmax-100,rodinal,1+25,64,5.75,20,MDC
+tmax-100,rodinal,1+25,100,5.75,20,MDC median of 2
+tmax-100,rodinal,1+25,400,8.50,20,MDC
+tmax-100,rodinal,1+50,50,10.00,20,MDC
+tmax-100,rodinal,1+50,100,13.50,20,MDC median of 2
+tmax-400,d76,1+1,50,8.00,20,MDC
+tmax-400,d76,1+1,100,8.75,20,MDC
+tmax-400,d76,1+1,400,10.73,20,MDC median of 2
+tmax-400,d76,1+1,1600,19.02,20,MDC
+tmax-400,d76,stock,400,7.50,20,MDC
+tmax-400,d76,stock,800,7.50,20,MDC
+tmax-400,d76,stock,1600,9.25,20,MDC
+tmax-400,fx55,1+9,400,14.50,20,MDC
+tmax-400,hc110,B,400,5.75,20,MDC
+tmax-400,hc110,B,800,5.75,20,MDC
+tmax-400,hc110,B,1600,7.50,20,MDC
+tmax-400,hc110,B,3200,9.50,20,MDC
+tmax-400,hc110,E,400,10.36,20,MDC
+tmax-400,hc110,H,400,12.78,20,MDC median of 2
+tmax-400,rodinal,1+100,800,24.00,20,MDC
+tmax-400,rodinal,1+25,400,6.00,20,MDC median of 2
+tmax-400,rodinal,1+25,800,9.00,20,MDC
+tmax-400,rodinal,1+25,1600,11.00,20,MDC
+tmax-400,rodinal,1+25,3200,17.00,20,MDC
+tmax-400,rodinal,1+50,100,3.75,20,MDC
+tmax-400,rodinal,1+50,200,8.00,20,MDC
+tmax-400,rodinal,1+50,400,12.00,20,MDC median of 3
+tmax-400,rodinal,1+50,800,12.00,20,MDC
+tmax-400,rodinal,1+50,1600,18.00,20,MDC
+tri-x,d76,1+1,50,7.00,20,MDC
+tri-x,d76,1+1,400,9.65,20,MDC median of 2
+tri-x,d76,1+1,800,9.75,20,MDC
+tri-x,d76,1+1,1600,13.25,20,MDC
+tri-x,d76,1+1,3200,15.96,20,MDC median of 2
+tri-x,d76,stock,400,6.75,20,MDC
+tri-x,d76,stock,800,6.75,20,MDC
+tri-x,d76,stock,1600,9.50,20,MDC
+tri-x,d76,stock,3200,11.00,20,MDC
+tri-x,d96,stock,400,8.00,20,MDC
+tri-x,fx55,1+9,400,12.50,20,MDC
+tri-x,hc110,B,200,5.25,20,MDC median of 2
+tri-x,hc110,B,400,5.25,20,MDC
+tri-x,hc110,B,800,8.50,20,MDC
+tri-x,hc110,B,1600,16.00,20,MDC
+tri-x,hc110,E,200,5.50,20,MDC
+tri-x,hc110,E,400,8.80,20,MDC median of 2
+tri-x,hc110,E,800,13.42,20,MDC
+tri-x,hc110,E,3200,21.32,20,MDC
+tri-x,hc110,H,400,9.00,20,MDC
+tri-x,rodinal,1+100,400,26.26,20,MDC
+tri-x,rodinal,1+25,200,7.00,20,MDC
+tri-x,rodinal,1+25,400,7.00,20,MDC
+tri-x,rodinal,1+25,800,9.32,20,MDC
+tri-x,rodinal,1+25,1600,13.00,20,MDC
+tri-x,rodinal,1+25,3200,17.78,20,MDC
+tri-x,rodinal,1+50,100,7.50,20,MDC
+tri-x,rodinal,1+50,200,9.00,20,MDC
+tri-x,rodinal,1+50,400,14.00,20,MDC
+tri-x,rodinal,1+50,800,17.03,20,MDC
+tri-x,rodinal,1+50,1600,18.50,20,MDC
+tri-x,rodinal,1+50,3200,33.00,20,MDC

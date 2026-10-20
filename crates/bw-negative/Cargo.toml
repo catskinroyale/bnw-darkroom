@@ -1,0 +1,13 @@
+[package]
+name = "bw-negative"
+description = "Negative simulation: exposure, development, adjacency effects and grain."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bw-core = { path = "../bw-core" }
+bw-film = { path = "../bw-film" }
+bw-developer = { path = "../bw-developer" }
+rayon.workspace = true
