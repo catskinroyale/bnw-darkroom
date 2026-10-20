@@ -35,10 +35,34 @@ cargo run --release -p bw-desktop -- ~/Pictures # desktop app (optional folder o
 cargo run --release -p bw-cli -- variations --input chart --out out/chart
 ```
 
+### macOS app
+
+```sh
+tools/package-macos.sh   # → dist/BW Darkroom.app and dist/BW-Darkroom-<version>-arm64.dmg
+```
+
+The app is ad-hoc signed, not notarised: on another Mac, open it the first time with
+right-click → Open. Set `SIGN_IDENTITY="Developer ID Application: …"` to sign it properly,
+then notarise the DMG with `xcrun notarytool` and `xcrun stapler`.
+
 Nikon High Efficiency (HE/HE★) NEFs are not supported; use lossless compressed NEF.
 Set `BW_RAW_SAMPLE=/path/to/file.NEF` to include a real raw file in `cargo test`.
 
 After editing `data/development/mdc-times.csv`, run `python3 -I tools/curate_times.py`.
+
+## Licensing
+
+| Part | Licence |
+|---|---|
+| `crates/bw-core` | MIT ([LICENSE-MIT](LICENSE-MIT)) |
+| All other crates, `apps/bw-desktop`, `apps/bw-cli`, and plugins | Apache-2.0 ([LICENSE-APACHE](LICENSE-APACHE)) |
+
+Each crate's `Cargo.toml` states its licence. New crates and plugins default to
+Apache-2.0 through the workspace setting.
+
+Third-party code keeps its own licence: `lightcraft-raw` and its supporting crates are
+MIT OR Apache-2.0. The development-time data in `data/development/` is compiled from the
+Massive Dev Chart (Digital Truth) and is not covered by this project's licences.
 
 ## Data sources
 

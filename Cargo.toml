@@ -5,7 +5,9 @@ members = ["crates/*", "apps/*"]
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
-license = "MIT OR Apache-2.0"
+# Default for every crate: Apache-2.0 (engine crates, apps, plugins). bw-core is MIT and
+# sets its own licence. See README "Licensing".
+license = "Apache-2.0"
 rust-version = "1.99"
 
 [workspace.dependencies]
@@ -27,3 +29,11 @@ debug = 1
 
 [profile.test]
 opt-level = 2
+
+# Distribution builds (tools/package-macos.sh): no debug info, stripped, thin LTO.
+[profile.dist]
+inherits = "release"
+debug = false
+strip = true
+lto = "thin"
+codegen-units = 1
