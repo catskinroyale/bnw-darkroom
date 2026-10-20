@@ -22,3 +22,10 @@ dirs = "7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Native application menu (About, Hide, Quit, Window), MIT OR Apache-2.0.
+muda = { version = "0.21", default-features = false }
+
+[dev-dependencies]
+exif = { package = "kamadak-exif", version = "0.6" }

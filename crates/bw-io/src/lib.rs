@@ -3,11 +3,14 @@
 //! The engine works on scene-linear planes. This crate converts files to and from
 //! that representation; it contains no photographic modelling.
 
+pub mod metadata;
+
 use std::path::Path;
 
 use bw_core::Plane;
 use bw_negative::{Negative, SceneImage};
-use image::{DynamicImage, ImageBuffer, Luma};
+use image::{DynamicImage, ImageBuffer, ImageEncoder, Luma};
+pub use metadata::{Exif, ExportMetadata, read_exif};
 use rayon::prelude::*;
 
 /// File extensions the loader accepts.
@@ -231,45 +234,51 @@ pub fn save_srgb_png(plane: &Plane, path: &Path) -> image::ImageResult<()> {
     buf.save(path)
 }
 
-/// Reflectance as a 16-bit greyscale TIFF with the sRGB transfer curve, suitable for
-/// viewing and editing applications. No ICC profile is embedded.
-pub fn save_print_tiff16(plane: &Plane, path: &Path) -> image::ImageResult<()> {
-    let data: Vec<u16> = plane
+fn to_image_error(e: impl std::fmt::Display) -> image::ImageError {
+    image::ImageError::IoError(std::io::Error::other(e.to_string()))
+}
+
+fn srgb16(plane: &Plane) -> Vec<u16> {
+    plane
         .data()
         .par_iter()
         .map(|&v| (linear_to_srgb(v) * 65535.0 + 0.5) as u16)
-        .collect();
-    let buf: ImageBuffer<Luma<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(plane.width() as u32, plane.height() as u32, data)
-            .expect("buffer matches dimensions");
-    buf.save(path)
+        .collect()
 }
 
-/// Reflectance as an 8-bit greyscale JPEG (sRGB transfer curve) at `quality` 1–100.
-pub fn save_print_jpeg(plane: &Plane, path: &Path, quality: u8) -> image::ImageResult<()> {
+/// Reflectance as an 8-bit greyscale JPEG (sRGB transfer curve) at `quality` 1–100,
+/// with `meta` written as an EXIF segment.
+pub fn save_print_jpeg(
+    plane: &Plane,
+    path: &Path,
+    quality: u8,
+    meta: &ExportMetadata,
+) -> image::ImageResult<()> {
+    let (w, h) = (plane.width() as u32, plane.height() as u32);
     let data = plane_to_srgb_gray8(plane);
     let file = std::io::BufWriter::new(std::fs::File::create(path)?);
     let mut encoder =
         image::codecs::jpeg::JpegEncoder::new_with_quality(file, quality.clamp(1, 100));
-    encoder.encode(
-        &data,
-        plane.width() as u32,
-        plane.height() as u32,
-        image::ExtendedColorType::L8,
-    )
+    encoder
+        .set_exif_metadata(meta.exif_block(w, h).map_err(to_image_error)?)
+        .map_err(to_image_error)?;
+    encoder.write_image(&data, w, h, image::ExtendedColorType::L8)
 }
 
-/// Reflectance as a 16-bit greyscale PNG (sRGB transfer curve).
-pub fn save_print_png16(plane: &Plane, path: &Path) -> image::ImageResult<()> {
-    let data: Vec<u16> = plane
-        .data()
-        .par_iter()
-        .map(|&v| (linear_to_srgb(v) * 65535.0 + 0.5) as u16)
-        .collect();
-    let buf: ImageBuffer<Luma<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(plane.width() as u32, plane.height() as u32, data)
-            .expect("buffer matches dimensions");
-    buf.save_with_format(path, image::ImageFormat::Png)
+/// Reflectance as a 16-bit greyscale PNG (sRGB transfer curve) with an eXIf chunk.
+pub fn save_print_png16(
+    plane: &Plane,
+    path: &Path,
+    meta: &ExportMetadata,
+) -> image::ImageResult<()> {
+    let (w, h) = (plane.width() as u32, plane.height() as u32);
+    let bytes: Vec<u8> = srgb16(plane).iter().flat_map(|v| v.to_ne_bytes()).collect();
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = image::codecs::png::PngEncoder::new(file);
+    encoder
+        .set_exif_metadata(meta.exif_block(w, h).map_err(to_image_error)?)
+        .map_err(to_image_error)?;
+    encoder.write_image(&bytes, w, h, image::ExtendedColorType::L16)
 }
 
 /// Resample a plane (linear light) so its long edge is `long_edge` pixels, with a
@@ -289,6 +298,21 @@ pub fn resize_long_edge(plane: &Plane, long_edge: usize) -> Plane {
     let out = image::imageops::resize(&buf, nw, nh, image::imageops::FilterType::Lanczos3);
     let data = out.into_raw().into_iter().map(|v| v.max(0.0)).collect();
     Plane::from_vec(nw as usize, nh as usize, data).expect("sizes match")
+}
+
+/// Reflectance as a 16-bit greyscale TIFF with the sRGB transfer curve, suitable for
+/// viewing and editing applications, with `meta` in EXIF and GPS directories. No ICC
+/// profile is embedded.
+pub fn save_print_tiff16(
+    plane: &Plane,
+    path: &Path,
+    meta: &ExportMetadata,
+) -> image::ImageResult<()> {
+    let bytes = meta
+        .tiff16(plane.width() as u32, plane.height() as u32, &srgb16(plane))
+        .map_err(to_image_error)?;
+    std::fs::write(path, bytes)?;
+    Ok(())
 }
 
 /// Linear reflectance as a 16-bit TIFF.
@@ -381,8 +405,12 @@ mod tests {
         assert_eq!(resize_long_edge(&plane, 1000).width(), 300);
 
         let (hi, lo) = (dir.join("q95.jpg"), dir.join("q20.jpg"));
-        save_print_jpeg(&plane, &hi, 95).unwrap();
-        save_print_jpeg(&plane, &lo, 20).unwrap();
+        let meta = ExportMetadata {
+            software: "test".into(),
+            ..Default::default()
+        };
+        save_print_jpeg(&plane, &hi, 95, &meta).unwrap();
+        save_print_jpeg(&plane, &lo, 20, &meta).unwrap();
         assert!(std::fs::metadata(&hi).unwrap().len() > std::fs::metadata(&lo).unwrap().len());
         assert!(matches!(
             image::open(&hi).unwrap(),
@@ -390,7 +418,7 @@ mod tests {
         ));
 
         let png = dir.join("p.png");
-        save_print_png16(&plane, &png).unwrap();
+        save_print_png16(&plane, &png, &meta).unwrap();
         assert!(matches!(
             image::open(&png).unwrap(),
             DynamicImage::ImageLuma16(_)

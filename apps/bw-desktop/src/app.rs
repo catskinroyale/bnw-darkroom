@@ -95,6 +95,10 @@ pub struct App {
     exports_running: usize,
     status: String,
 
+    about: crate::about::About,
+    #[cfg(target_os = "macos")]
+    menu: Option<crate::menu::AppMenu>,
+
     /// Test hook: `BW_DARKROOM_SCREENSHOT=<png>` saves one screenshot of the window once
     /// the image, preview and gallery have rendered, then quits.
     screenshot: Option<(PathBuf, std::time::Instant, bool)>,
@@ -178,6 +182,9 @@ impl App {
             export_open: false,
             exports_running: 0,
             status: String::new(),
+            about: Default::default(),
+            #[cfg(target_os = "macos")]
+            menu: crate::menu::AppMenu::install(&cc.egui_ctx),
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
@@ -657,6 +664,10 @@ impl App {
         let Some((path, started, requested)) = &mut self.screenshot else {
             return;
         };
+        // `BW_DARKROOM_SCREENSHOT_ABOUT=1` opens the About window for the shot.
+        if std::env::var_os("BW_DARKROOM_SCREENSHOT_ABOUT").is_some() {
+            self.about.open = true;
+        }
         // `BW_DARKROOM_SCREENSHOT_EXPORT=1` also opens the export dialog for the shot.
         if self.loaded.is_some() && std::env::var_os("BW_DARKROOM_SCREENSHOT_EXPORT").is_some() {
             self.export_open = true;
@@ -682,7 +693,12 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("BW Darkroom");
+            ui.heading("BW Darkroom")
+                .on_hover_text(format!("Version {}", crate::version::full()));
+            #[cfg(not(target_os = "macos"))]
+            if ui.small_button("About").clicked() {
+                self.about.open = true;
+            }
             ui.separator();
             ui.toggle_value(&mut self.show_browser, "Files")
                 .on_hover_text("Show or hide the file browser (B)");
@@ -1129,6 +1145,11 @@ impl eframe::App for App {
         if self.export_open {
             self.export_dialog(ctx);
         }
+        #[cfg(target_os = "macos")]
+        if self.menu.as_ref().is_some_and(|m| m.take_about_request()) {
+            self.about.open = true;
+        }
+        self.about.show(ctx);
         self.screenshot_hook(ctx);
 
         if self.detail_enabled && self.loaded.is_some() {

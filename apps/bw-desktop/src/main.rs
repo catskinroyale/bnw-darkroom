@@ -4,12 +4,16 @@
 //! The app is a thin shell over the engine. All photographic work happens in the
 //! engine crates; rendering runs on background threads so the UI stays responsive.
 
+mod about;
 mod app;
 mod browser;
 mod export;
 mod image_panel;
+#[cfg(target_os = "macos")]
+mod menu;
 mod source;
 mod styles;
+mod version;
 mod worker;
 mod workflow;
 

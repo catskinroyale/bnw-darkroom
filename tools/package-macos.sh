@@ -22,6 +22,9 @@ APP="$DIST/$APP_NAME.app"
 DMG="$DIST/BW-Darkroom-$VERSION-$ARCH.dmg"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
+echo "==> Listing third-party licences for the About window"
+python3 -I tools/gen_licenses.py
+
 echo "==> Building $APP_NAME $VERSION ($ARCH)"
 cargo build --profile dist -p bw-desktop
 

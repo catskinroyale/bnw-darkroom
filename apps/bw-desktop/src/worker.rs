@@ -343,6 +343,29 @@ pub fn recipe_path(image: &std::path::Path) -> PathBuf {
     image.with_file_name(name)
 }
 
+/// Metadata for an export: the source's EXIF (camera, lens, exposure, dates, GPS,
+/// artist, copyright), this application as Software, and the recipe as a comment.
+fn export_metadata(job: &ExportJob) -> bw_io::ExportMetadata {
+    let s = &job.style;
+    let process = s.processing();
+    let comment = format!(
+        "{}: {} in {}, EI {:.0}, {:.2} min at {:.1} C, {}, paper grade {:.1}",
+        s.name,
+        bw_profiles::film_label(&s.film),
+        bw_profiles::developer_label(&s.developer),
+        s.exposure_index,
+        process.time_min,
+        process.temperature_c,
+        s.development.agitation.label().to_lowercase(),
+        s.print.grade,
+    );
+    bw_io::ExportMetadata {
+        exif: bw_io::read_exif(&job.source_path),
+        software: format!("BW Darkroom {}", env!("CARGO_PKG_VERSION")),
+        comment: Some(comment),
+    }
+}
+
 /// Develop and render at full resolution, then write the image (and its JSON recipe).
 pub fn spawn_export(job: ExportJob, tx: Sender<Msg>, ctx: egui::Context) {
     std::thread::Builder::new()
@@ -362,11 +385,12 @@ pub fn spawn_export(job: ExportJob, tx: Sender<Msg>, ctx: egui::Context) {
                     None => rendered.print.clone(),
                 };
                 let path = resolve_conflict(job.target.clone(), job.conflict);
+                let meta = export_metadata(&job);
                 match job.format {
-                    Format::Jpeg => bw_io::save_print_jpeg(&print, &path, job.jpeg_quality),
-                    Format::Png16 => bw_io::save_print_png16(&print, &path),
+                    Format::Jpeg => bw_io::save_print_jpeg(&print, &path, job.jpeg_quality, &meta),
+                    Format::Png16 => bw_io::save_print_png16(&print, &path, &meta),
                     Format::Tiff16 | Format::SameAsOriginal => {
-                        bw_io::save_print_tiff16(&print, &path)
+                        bw_io::save_print_tiff16(&print, &path, &meta)
                     }
                 }
                 .map_err(|e| e.to_string())?;
@@ -430,6 +454,116 @@ mod tests {
             Msg::Exported { tiff, .. } => tiff,
             Msg::ExportFailed { error } => panic!("{error}"),
             _ => panic!("unexpected message"),
+        }
+    }
+
+    #[test]
+    fn exports_carry_source_exif_in_every_format() {
+        let dir = std::env::temp_dir().join(format!("bw-exif-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A source JPEG with camera EXIF and a non-default orientation.
+        let source = dir.join("source.jpg");
+        let make = exif::Field {
+            tag: exif::Tag::Make,
+            ifd_num: exif::In::PRIMARY,
+            value: exif::Value::Ascii(vec![b"NIKON CORPORATION".to_vec()]),
+        };
+        let src_meta = bw_io::ExportMetadata {
+            exif: Some(bw_io::Exif::from_fields(vec![make])),
+            software: "Camera firmware".into(),
+            comment: None,
+        };
+        let plane = bw_core::Plane::from_fn(96, 64, |x, y| 0.01 + (x + y) as f32 / 160.0).unwrap();
+        bw_io::save_print_jpeg(&plane, &source, 90, &src_meta).unwrap();
+        let job_for = |format| {
+            let mut j = job(&dir, format, Conflict::Overwrite);
+            j.source_path = source.clone();
+            j
+        };
+        for format in [Format::Tiff16, Format::Jpeg, Format::Png16] {
+            let out = run(job_for(format));
+            // Read everything the file holds (bw_io::read_exif filters for re-export).
+            let mut reader = std::io::BufReader::new(std::fs::File::open(&out).unwrap());
+            let exif = exif::Reader::new()
+                .read_from_container(&mut reader)
+                .unwrap_or_else(|e| panic!("{format:?}: no EXIF: {e}"));
+            let text = |t| {
+                exif.get_field(t, exif::In::PRIMARY)
+                    .map(|f| f.display_value().to_string())
+                    .unwrap_or_default()
+            };
+            assert!(
+                text(exif::Tag::Make).contains("NIKON"),
+                "{format:?}: camera kept"
+            );
+            assert!(
+                text(exif::Tag::Software).contains("BW Darkroom"),
+                "{format:?}"
+            );
+            // Rotated a quarter turn on export: dimensions follow the output.
+            assert_eq!(text(exif::Tag::PixelXDimension), "64", "{format:?}");
+            assert!(
+                exif.get_field(exif::Tag::UserComment, exif::In::PRIMARY)
+                    .is_some(),
+                "{format:?}"
+            );
+            assert_eq!(
+                text(exif::Tag::Orientation),
+                "row 0 at top and column 0 at left"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// With `BW_RAW_SAMPLE` set to a raw file, export it and check the camera record
+    /// survives. `BW_KEEP_EXPORTS=1` leaves the files in the temp folder for inspection.
+    #[test]
+    fn raw_export_keeps_camera_exif_when_sample_available() {
+        let Some(sample) = std::env::var_os("BW_RAW_SAMPLE").map(PathBuf::from) else {
+            eprintln!("skipped: set BW_RAW_SAMPLE");
+            return;
+        };
+        let Ok(source) = Source::open(&sample) else {
+            eprintln!("skipped: sample can't be decoded");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("bw-raw-exif-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let source = Arc::new(source);
+        for format in [Format::Jpeg, Format::Tiff16] {
+            let mut j = job(&dir, format, Conflict::Overwrite);
+            j.source = source.clone();
+            j.source_path = sample.clone();
+            j.adjust = RawAdjust::default();
+            j.long_edge = Some(1200);
+            let out = run(j);
+            let mut reader = std::io::BufReader::new(std::fs::File::open(&out).unwrap());
+            let exif = exif::Reader::new()
+                .read_from_container(&mut reader)
+                .unwrap();
+            for tag in [
+                exif::Tag::Make,
+                exif::Tag::Model,
+                exif::Tag::ExposureTime,
+                exif::Tag::FNumber,
+                exif::Tag::PhotographicSensitivity,
+                exif::Tag::DateTimeOriginal,
+                exif::Tag::FocalLength,
+            ] {
+                assert!(
+                    exif.get_field(tag, exif::In::PRIMARY).is_some(),
+                    "{format:?}: {tag} missing"
+                );
+            }
+            assert!(
+                exif.get_field(exif::Tag::MakerNote, exif::In::PRIMARY)
+                    .is_none()
+            );
+            eprintln!("{}", out.display());
+        }
+        if std::env::var_os("BW_KEEP_EXPORTS").is_none() {
+            std::fs::remove_dir_all(&dir).unwrap();
         }
     }
 

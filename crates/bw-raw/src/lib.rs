@@ -551,6 +551,10 @@ mod tests {
         assert!((y.data().iter().copied().fold(0.0f32, f32::max) - 1.5).abs() < 1e-6);
     }
 
+    fn exif_tag_make() -> bw_io::metadata::ExifTag {
+        bw_io::metadata::ExifTag::Make
+    }
+
     /// Decodes a real Nikon Z f NEF when `BW_RAW_SAMPLE` points at one (CC0 samples:
     /// raw.pixls.us/data/Nikon/Z f/).
     #[test]
@@ -577,6 +581,9 @@ mod tests {
         }
         let (t, _) = photo.as_shot_temp_tint();
         assert!((2000.0..12000.0).contains(&t), "as-shot temperature {t}");
+        // The raw file's EXIF (camera, exposure, date) is readable for exports.
+        let exif = bw_io::read_exif(Path::new(&path)).expect("raw EXIF");
+        assert!(exif.get(exif_tag_make()).is_some());
         let scene = photo.downscaled(800).develop(&RawAdjust::default());
         let (w, h) = scene.dimensions();
         assert!(w.max(h) <= 800);
