@@ -5,7 +5,7 @@
 //! engine.
 
 use bw_core::{CalibrationLevel, FilmGeometry, Plane};
-use bw_darkroom::{PrintSettings, print};
+use bw_darkroom::{PrintExposure, PrintSettings, print};
 use bw_developer::{Agitation, ProcessingConditions};
 use bw_negative::{
     ExposureSettings, Metering, Negative, RenderOptions, SceneImage, develop, illustrative,
@@ -141,13 +141,26 @@ impl Style {
         illustrative::box_ei(&self.film).unwrap_or(400.0)
     }
 
-    /// Push (+) or pull (−) in stops relative to the film's box EI.
+    /// The EI the film is exposed at: always box speed. The source file is already
+    /// correctly exposed, so push and pull change development only (Zone System N+ and
+    /// N−); exposure compensation under- or over-exposes the film.
+    pub fn exposure_ei(&self) -> f64 {
+        self.box_ei()
+    }
+
+    /// Film-plane log exposure (log lux·s) of the metered mid-grey.
+    fn grey_log_h(&self) -> f64 {
+        (bw_negative::METER_QK / self.exposure_ei()).log10()
+            + std::f64::consts::LOG10_2 * self.ev_compensation
+    }
+
+    /// Push (+) or pull (−) in stops relative to the film's box EI: development for
+    /// that EI, with the exposure kept.
     pub fn push_stops(&self) -> f64 {
         (self.exposure_index / self.box_ei()).log2()
     }
 
-    /// Rate the film `stops` from box speed, and let development follow the published
-    /// time for that EI.
+    /// Develop `stops` from box speed, following the published time for that EI.
     pub fn set_push_stops(&mut self, stops: f64) {
         self.exposure_index = (self.box_ei() * 2f64.powf(stops)).round();
         self.development.time_min = None;
@@ -175,12 +188,34 @@ impl Style {
         }
     }
 
+    /// Print settings. The enlarger exposure holds the black point that normal
+    /// development of this film and developer gives with mid-grey printed at the default
+    /// density, so a normally developed negative prints exactly as with mid-grey
+    /// anchoring, and longer or shorter development opens or closes the tones from there:
+    /// blacks hold, shadows open slightly and highlights brighten with a push.
     pub fn print_settings(&self) -> PrintSettings {
-        PrintSettings {
+        let mut settings = PrintSettings {
             grade: self.print.grade,
             exposure_adjust_stops: self.print.exposure_stops,
             ..Default::default()
+        };
+        let PrintExposure::MidGreyAt { print_density } = settings.exposure else {
+            return settings;
+        };
+        if let (Ok((_, calibration)), Some(normal_time)) = (self.combination(), self.normal_time())
+        {
+            let normal = calibration.resolve(&ProcessingConditions {
+                time_min: normal_time,
+                ..self.processing()
+            });
+            let grey_above_base = calibration.net_density(self.grey_log_h(), &normal) - normal.fog;
+            settings.exposure = PrintExposure::BaseAt {
+                print_density: settings.density_at(
+                    settings.log_exposure_for(print_density) + settings.callier_q * grey_above_base,
+                ),
+            };
         }
+        settings
     }
 
     /// Model sensitometry for this style's film/developer/process, without an image.
@@ -210,8 +245,7 @@ impl Style {
                 (-4.5, 0.5),
                 101,
             ),
-            grey_log_h: (bw_negative::METER_QK / self.exposure_index).log10()
-                + std::f64::consts::LOG10_2 * self.ev_compensation,
+            grey_log_h: self.grey_log_h(),
             warnings: calibration.warnings(&process),
             time_min: process.time_min,
         })
@@ -257,7 +291,7 @@ pub fn render(
     let geometry = FilmGeometry::from_frame_width(frame_width_mm, w, h)?;
     let (film, calibration) = style.combination()?;
     let exposure = ExposureSettings {
-        exposure_index: style.exposure_index,
+        exposure_index: style.exposure_ei(),
         metering: Metering::Anchor { grey: 0.18 },
         ev_compensation: style.ev_compensation,
         flare_fraction: 0.0,

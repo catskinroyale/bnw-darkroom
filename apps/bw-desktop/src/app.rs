@@ -24,6 +24,8 @@ const KEY_FOLDER: &str = "folder";
 const KEY_VIEW: &str = "workflow_view";
 const KEY_THEME: &str = "theme";
 const KEY_BROWSER_THUMBS: &str = "browser_thumbs";
+const KEY_BROWSER_BITMAPS: &str = "browser_bitmaps";
+const KEY_BROWSER_JPEGS: &str = "browser_jpegs";
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
@@ -76,6 +78,8 @@ pub struct App {
     view: workflow::View,
     /// File browser shows thumbnails in its rows (otherwise a compact list).
     browser_thumbs: bool,
+    /// Which non-raw files the browser lists (raw files always are).
+    browser_filter: browser::Filter,
     /// Long edge, in pixels, the preview is rendered at (follows the screen size).
     preview_edge: usize,
 
@@ -189,6 +193,10 @@ impl App {
             draft,
             view,
             browser_thumbs: get(KEY_BROWSER_THUMBS).is_some_and(|v| v == "1"),
+            browser_filter: browser::Filter {
+                bitmaps: get(KEY_BROWSER_BITMAPS).is_some_and(|v| v == "1"),
+                jpegs: get(KEY_BROWSER_JPEGS).is_some_and(|v| v == "1"),
+            },
             presets: bw_profiles::photographer_presets(),
             rename_dialog: None,
             delete_dialog: None,
@@ -277,7 +285,7 @@ impl App {
         let images: Vec<&PathBuf> = self
             .entries
             .iter()
-            .filter(|e| !e.is_dir)
+            .filter(|e| !e.is_dir && self.browser_filter.shows(e.kind))
             .map(|e| &e.path)
             .collect();
         if images.is_empty() {
@@ -1058,6 +1066,14 @@ impl App {
         if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_THUMBS") {
             self.browser_thumbs = v == "1";
         }
+        // `BW_DARKROOM_SCREENSHOT_SHOW=bitmaps,jpegs` (or empty) sets the browser's filter.
+        if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_SHOW") {
+            let v = v.to_string_lossy();
+            self.browser_filter = browser::Filter {
+                bitmaps: v.contains("bitmaps"),
+                jpegs: v.contains("jpegs"),
+            };
+        }
         // `BW_DARKROOM_SCREENSHOT_EDIT=1` opens the style editor for the shot.
         if std::env::var_os("BW_DARKROOM_SCREENSHOT_EDIT").is_some() {
             self.edit_open = true;
@@ -1158,8 +1174,6 @@ impl App {
     /// shortened in the middle so the frame number and extension stay visible, the file
     /// type as a right-hand tag, the thumbnail on hover), or rows with thumbnails.
     fn browser_panel(&mut self, ui: &mut egui::Ui) {
-        let images = self.entries.iter().filter(|e| !e.is_dir).count();
-        let folders = self.entries.len() - images;
         let mut open: Option<PathBuf> = None;
         let mut select: Option<PathBuf> = None;
 
@@ -1178,13 +1192,50 @@ impl App {
                     .on_hover_text(self.folder.display().to_string());
             });
         });
+        // File types: raw is fixed on (the app is for raw files); the others are opt-in.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add_enabled(
+                false,
+                egui::Button::selectable(true, egui::RichText::new("RAW").small()),
+            )
+            .on_disabled_hover_text("Camera raw files (NEF, DNG, ARW) are always listed");
+            ui.toggle_value(
+                &mut self.browser_filter.bitmaps,
+                egui::RichText::new("TIFF/PNG").small(),
+            )
+            .on_hover_text(
+                "Also list lossless bitmaps (TIFF, PNG), such as scans or edited masters",
+            );
+            ui.toggle_value(
+                &mut self.browser_filter.jpegs,
+                egui::RichText::new("JPEG").small(),
+            )
+            .on_hover_text("Also list compressed JPEG files");
+        });
+        let filter = self.browser_filter;
+        let images = self
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir && filter.shows(e.kind))
+            .count();
+        let folders = self.entries.iter().filter(|e| e.is_dir).count();
+        let hidden = self
+            .entries
+            .iter()
+            .filter(|e| !filter.shows(e.kind))
+            .count();
         let plural =
             |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
         let mut count = plural(images, "image", "images");
         if folders > 0 {
             count.push_str(&format!(" · {}", plural(folders, "folder", "folders")));
         }
+        if hidden > 0 {
+            count.push_str(&format!(" · {hidden} hidden"));
+        }
         ui.label(egui::RichText::new(count).small().weak());
+        let mut show_all = false;
         ui.separator();
 
         let thumbs_on = self.browser_thumbs;
@@ -1209,10 +1260,21 @@ impl App {
                             .x
                     })
                 };
-                if self.entries.is_empty() {
-                    ui.label(egui::RichText::new("No folders or images here").weak());
+                if images + folders == 0 {
+                    if hidden > 0 {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "No raw files here; {} hidden",
+                                plural(hidden, "JPEG/TIFF/PNG file", "JPEG/TIFF/PNG files")
+                            ))
+                            .weak(),
+                        );
+                        show_all = ui.small_button("Show them").clicked();
+                    } else {
+                        ui.label(egui::RichText::new("No folders or images here").weak());
+                    }
                 }
-                for entry in &self.entries {
+                for entry in self.entries.iter().filter(|e| filter.shows(e.kind)) {
                     if entry.is_dir {
                         // Folders carry a "Folder" tag, like the file-type tags on images.
                         let room = width - padding - measure("Folder", &small_font);
@@ -1270,6 +1332,12 @@ impl App {
                     }
                 }
             });
+        if show_all {
+            self.browser_filter = browser::Filter {
+                bitmaps: true,
+                jpegs: true,
+            };
+        }
         if let Some(folder) = open {
             self.open_folder(folder);
         }
@@ -1817,6 +1885,9 @@ impl eframe::App for App {
             KEY_BROWSER_THUMBS,
             if self.browser_thumbs { "1" } else { "0" }.into(),
         );
+        let flag_str = |b: bool| if b { "1" } else { "0" }.to_string();
+        storage.set_string(KEY_BROWSER_BITMAPS, flag_str(self.browser_filter.bitmaps));
+        storage.set_string(KEY_BROWSER_JPEGS, flag_str(self.browser_filter.jpegs));
         let flag = |b: bool| if b { '1' } else { '0' };
         storage.set_string(
             KEY_PANELS,

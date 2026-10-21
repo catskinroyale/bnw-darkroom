@@ -26,7 +26,7 @@ Conventions used throughout:
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D1 | The pipeline works on **absolute log exposure** (log lux·s) at the film plane, not normalised image values. | Characteristic curves, ISO speed and published data are defined against absolute exposure. Without an absolute exposure axis, EI has no physical meaning. |
-| D2 | **Exposure index (EI) is an exposure setting, not a processing setting.** | EI decides where the scene lands on the curve. Development decides the shape of the curve. Push processing is the two applied together, not a separate mode. |
+| D2 | **Exposure index (EI) is an exposure setting, not a processing setting.** | EI decides where the scene lands on the curve. Development decides the shape of the curve. Push processing is the two applied together, not a separate mode. *Application note (0.5):* the source photo is already correctly exposed, so the app's styles expose the film at box speed and use the style's EI only to pick the published development time. Push and pull are therefore N+/N− development (Adams's expansion and contraction); an underexposed push is box exposure with negative exposure compensation. The engine (`bw-negative`) is unchanged and still takes EI as exposure. |
 | D3 | Each characteristic curve is a **development-growth family** `D(h, τ) = D_fog(τ) + D∞(h)·(1 − e^(−τ/τc(h)))`, fitted to manufacturer curves and contrast-vs-time data. | It reproduces the observed saturating rise of contrast with time. It has few parameters, so it can be fitted from sparse data, and it can be tested against curve families where manufacturers publish them. |
 | D4 | Time, temperature and agitation reduce to a single **effective development** value `τ`. Dilution is **calibrated per published dilution**, not modelled continuously. | Published data exists only at discrete dilutions. Dilution changes compensation, solvent action and acutance as well as rate. A continuous model would be invented physics. |
 | D5 | **Chemical formulations are descriptive metadata in the MVP.** They do not drive behaviour. | No published model predicts a film/developer curve from developer chemistry with useful accuracy. Behaviour comes from empirical calibrations. The formulation is kept so future models can use it. |
@@ -243,6 +243,9 @@ Behaviour that emerges without special cases:
 - **Push:** the higher EI moves the scene down the curve, and the larger `τ` raises mid-tone and highlight
   density more than toe density. Shadows are lost, mid-tones and highlights gain contrast, and fog and
   grain rise (§5.3). There is no "push" parameter.
+- **Expansion (N+ development at box exposure):** the larger `τ` adds a little density in the shadows and
+  much more in the highlights (Adams, *The Negative*, p. 72). Printed with the black point held (§9.1, minimal positive),
+  blacks stay black, shadows open slightly and highlights brighten. This is what the app's push does.
 - **Pull:** the reverse. Lower contrast and full shadows.
 - **Compensating and stand development:** `κ > 0` slows development where density is high. That
   compresses the highlights over large areas, while local adjacency (§3.5) gives the edge effects.
@@ -788,6 +791,10 @@ calibration level (constraint 7: visual similarity is not physical accuracy).
 - Grain: Poisson/Selwyn amplitude, single clump scale, density dependence with `ρ = 1`.
 - Minimal positive: `T = 10^(−Q·D)`, enlarger exposure, a single generic paper curve, so the negative can
   be viewed. Proper paper modelling is Phase 4.
+  The enlarger exposure holds the print's black point: clear film (base + fog) prints at the density
+  that the style's normally developed negative gives with mid-grey at 0.75. Normal development prints as
+  with mid-grey anchoring; changes of development then show as under a real enlarger, where the printer
+  keeps "minimum time for maximum black" rather than re-placing mid-grey for each negative.
 - `bw-cli`: `develop`, `print-basic`, `sensitometer` (step-tablet render plus curve/ISO/CI report as CSV),
   `calibrations` (list with levels and warnings).
 - First calibration: **Tri-X + D-76 at Level 2**, end to end, with all §8.1–8.2 tests passing before any

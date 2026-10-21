@@ -11,6 +11,53 @@ pub struct Entry {
     pub path: PathBuf,
     pub name: String,
     pub is_dir: bool,
+    pub kind: Kind,
+}
+
+/// What a listed entry is, for the browser's file-type filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Folder,
+    /// Camera raw (NEF, DNG, ARW): what the app is for, always listed.
+    Raw,
+    /// Lossless bitmaps (TIFF, PNG), e.g. scans or edited masters.
+    Bitmap,
+    /// Lossy compressed JPEGs.
+    Jpeg,
+}
+
+/// The kind of an image file, or `None` for files the app can't open.
+pub fn kind_of(path: &Path) -> Option<Kind> {
+    if bw_raw::is_raw(path) {
+        return Some(Kind::Raw);
+    }
+    if !bw_io::is_supported_image(path) {
+        return None;
+    }
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(if matches!(ext.as_str(), "jpg" | "jpeg") {
+        Kind::Jpeg
+    } else {
+        Kind::Bitmap
+    })
+}
+
+/// Which non-raw files the browser lists. Folders and raw files are always listed, so a
+/// raw-only view is the default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Filter {
+    pub bitmaps: bool,
+    pub jpegs: bool,
+}
+
+impl Filter {
+    pub fn shows(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::Folder | Kind::Raw => true,
+            Kind::Bitmap => self.bitmaps,
+            Kind::Jpeg => self.jpegs,
+        }
+    }
 }
 
 /// Sub-folders first, then supported images, each sorted by name. Hidden files skipped.
@@ -18,19 +65,28 @@ pub fn list_folder(folder: &Path) -> Vec<Entry> {
     let Ok(read) = std::fs::read_dir(folder) else {
         return Vec::new();
     };
-    let mut entries: Vec<Entry> =
-        read.filter_map(Result::ok)
-            .filter_map(|e| {
-                let path = e.path();
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    return None;
-                }
-                let is_dir = path.is_dir();
-                (is_dir || bw_io::is_supported_image(&path) || bw_raw::is_raw(&path))
-                    .then_some(Entry { path, name, is_dir })
+    let mut entries: Vec<Entry> = read
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let is_dir = path.is_dir();
+            let kind = if is_dir {
+                Kind::Folder
+            } else {
+                kind_of(&path)?
+            };
+            Some(Entry {
+                path,
+                name,
+                is_dir,
+                kind,
             })
-            .collect();
+        })
+        .collect();
     entries.sort_by(|a, b| {
         b.is_dir
             .cmp(&a.is_dir)
@@ -145,6 +201,25 @@ mod tests {
         assert_eq!(width(&short), 15.0);
         assert!(short.starts_with("Holiday") && short.ends_with(".NEF") && short.contains('…'));
         assert_eq!(middle_ellipsis("abcdef", 1.0, width), "…");
+    }
+
+    #[test]
+    fn raw_is_always_listed_and_others_are_optional() {
+        let kind = |name| kind_of(Path::new(name));
+        assert_eq!(kind("a.NEF"), Some(Kind::Raw));
+        assert_eq!(kind("a.dng"), Some(Kind::Raw));
+        assert_eq!(kind("a.tiff"), Some(Kind::Bitmap));
+        assert_eq!(kind("a.png"), Some(Kind::Bitmap));
+        assert_eq!(kind("a.JPEG"), Some(Kind::Jpeg));
+        assert_eq!(kind("a.txt"), None);
+        let raw_only = Filter::default();
+        assert!(raw_only.shows(Kind::Raw) && raw_only.shows(Kind::Folder));
+        assert!(!raw_only.shows(Kind::Bitmap) && !raw_only.shows(Kind::Jpeg));
+        let jpegs = Filter {
+            jpegs: true,
+            ..Filter::default()
+        };
+        assert!(jpegs.shows(Kind::Jpeg) && !jpegs.shows(Kind::Bitmap));
     }
 
     #[test]

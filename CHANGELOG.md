@@ -5,6 +5,28 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **File-type filter in the file browser.** Raw files (NEF, DNG, ARW) are always listed,
+  and are all that's listed by default. **TIFF/PNG** and **JPEG** toggles in the panel
+  header add lossless bitmaps and compressed JPEGs. The header counts the hidden files.
+  A folder with no raw files offers **Show them**. Arrow-key stepping skips hidden files,
+  and the toggles are remembered.
+
+### Changed
+- **Push and pull now change development only.** Your photo is already correctly
+  exposed, so the film is exposed at box speed. Push or pull picks the published time for
+  the pushed or pulled EI: Zone System N+ / N− development. Exposure compensation in
+  Detailed view still gives an underexposed push. Detailed view's "Exposure index" is
+  now labelled "Develop for EI".
+- **The print holds its black point.** Prints used to place mid-grey at the same density
+  for every negative, so a push turned existing blacks grey (Tri-X +2, zone 0 went from
+  1.86 to 1.51). The enlarger exposure now keeps clear film printing at the black of the
+  normally developed negative, as a printer setting "minimum time for maximum black"
+  would. Normal development prints exactly as before. A push keeps blacks, opens the
+  shadows slightly and brightens the highlights (HP5 HC-110 B +2: zone III goes from
+  1.46 to 1.25 and zone VII from 0.17 to 0.03, with zone 0 unchanged). A pull does the
+  reverse. Styles saved with a pushed EI change look accordingly.
+
 ## [0.4.1] - 2026-10-21
 
 ### Changed

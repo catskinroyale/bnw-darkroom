@@ -10,7 +10,7 @@ mod help {
     pub const FILM: &str = "The emulsion. It sets how colours turn into greys, the shape of the tone curve, sharpness and grain.";
     pub const DEVELOPER: &str = "The chemistry. It changes speed, contrast, grain and edge sharpness; the dilution changes how strongly.";
     pub const DILUTION: &str = "How much the developer is diluted. More dilute: longer times, more edge sharpness and highlight compensation.";
-    pub const PUSH: &str = "Rate the film faster (push) or slower (pull) and develop to match.\nPushing adds contrast and grain, not real shadow detail; pulling softens contrast.";
+    pub const PUSH: &str = "Develop longer (push) or shorter (pull), using the published time for the pushed or pulled EI.\nYour photo's exposure is kept and the print's black point holds: a push keeps blacks, opens shadows slightly,\nbrightens highlights and adds grain; a pull softens contrast. For an underexposed push, lower Exposure comp.";
     pub const GRAIN: &str = "Grain comes from the film and developer. The more the negative is enlarged, the more it shows.";
     pub const FORMAT: &str = "Film size. A larger negative is enlarged less for the same print, so its grain looks finer.";
     pub const CROP: &str = "Use only the centre of the frame. Cropping means enlarging the negative more, so grain grows.";
@@ -18,9 +18,8 @@ mod help {
     pub const NEW_PATTERN: &str = "Same grain amount and character, a different random pattern.";
     pub const GRAIN_READOUT: &str = "Diffuse RMS granularity at this enlargement (Kodak's measure).\nAround 10 looks smooth; above 25 looks gritty.";
     pub const NAME: &str = "Name of this style, used in the style list and in exported file names.";
-    pub const EI: &str = "Exposure index the film is rated at. Higher means less exposure: a thinner negative unless developed longer.";
-    pub const EV: &str =
-        "Extra exposure in stops on top of the EI, like the camera's exposure compensation.";
+    pub const EI: &str = "Exposure index the film is developed for: picks the published time. The film is still exposed\nat box speed, because your photo is already exposed; use Exposure comp. to under- or over-expose it.";
+    pub const EV: &str = "Under- or over-exposes the film in stops, like the camera's exposure compensation.\nWith a push, a negative value gives the classic underexposed push: empty shadows.";
     pub const TIME: &str = "Development time. 'Published' follows the time table for this film, developer and EI;\nuntick it to set your own. Longer development raises contrast and grain.";
     pub const TEMP: &str = "Developer temperature. Warmer developer works faster: more density and contrast for the same time.";
     pub const AGITATION: &str = "How often the tank is agitated. Less agitation gives stronger edge effects and compresses highlights.";
@@ -411,12 +410,12 @@ fn push_chips(ui: &mut egui::Ui, s: &mut Style) {
             let time = probe.recommended_time();
             let help = match time {
                 Some(t) => format!(
-                    "Rate at EI {:.0} and develop {:.1} min ({}).",
-                    probe.exposure_index,
+                    "Develop {:.1} min, as for EI {:.0} ({}).",
                     t.time_min,
+                    probe.exposure_index,
                     origin_label(Some(t.origin))
                 ),
-                None => format!("Rate at EI {:.0}.", probe.exposure_index),
+                None => format!("Develop as for EI {:.0}.", probe.exposure_index),
             };
             let selected = (current - stops).abs() < 0.17 && s.development.time_min.is_none();
             if chip(ui, selected, true, label, &help, "") {
@@ -429,7 +428,7 @@ fn push_chips(ui: &mut egui::Ui, s: &mut Style) {
 fn development_readout(ui: &mut egui::Ui, s: &Style, summary: Option<&ModelSummary>) {
     let Some(m) = summary else { return };
     let text = format!(
-        "Develop {:.1} min at {:.0} °C · EI {:.0} · {}",
+        "Develop {:.1} min at {:.0} °C, as for EI {:.0} · {}",
         m.time_min,
         s.development.temperature_c,
         s.exposure_index,
@@ -542,7 +541,7 @@ pub fn detailed(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>
         }
         ui.end_row();
 
-        ui.label("Exposure index").on_hover_text(help::EI);
+        ui.label("Develop for EI").on_hover_text(help::EI);
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut s.exposure_index).range(6.0..=12800.0).speed(5.0).suffix(" EI"))
                 .on_hover_text(help::EI);

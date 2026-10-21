@@ -27,6 +27,12 @@ impl Default for Paper {
 pub enum PrintExposure {
     /// Expose so the negative's metered mid-grey prints at this reflection density.
     MidGreyAt { print_density: f64 },
+    /// Expose so clear film (base + fog) prints at this reflection density: the
+    /// printer's black point ("minimum time for maximum black") held from negative to
+    /// negative. Development changes then print as they do under a real enlarger:
+    /// longer development adds density above the base, so blacks hold while shadows
+    /// open slightly and highlights brighten.
+    BaseAt { print_density: f64 },
     /// Explicit log exposure offset.
     LogOffset(f64),
 }
@@ -63,19 +69,38 @@ impl PrintSettings {
     pub fn log_exposure_range(&self) -> f64 {
         (1.40 - 0.2 * self.grade).max(0.2)
     }
+
+    /// Slope of the paper's logistic in log exposure.
+    fn slope(&self) -> f64 {
+        2.0 * 19f64.ln() / self.log_exposure_range()
+    }
+
+    /// Paper log exposure, relative to the curve's midpoint, that prints at `density`.
+    pub fn log_exposure_for(&self, density: f64) -> f64 {
+        let Paper { d_min, d_max } = self.paper;
+        let frac = ((density - d_min) / (d_max - d_min)).clamp(1e-4, 1.0 - 1e-4);
+        (frac / (1.0 - frac)).ln() / self.slope()
+    }
+
+    /// Reflection density at paper log exposure `log_h`, relative to the curve's midpoint.
+    pub fn density_at(&self, log_h: f64) -> f64 {
+        let Paper { d_min, d_max } = self.paper;
+        d_min + (d_max - d_min) / (1.0 + (-self.slope() * log_h).exp())
+    }
 }
 
 /// Print a negative. Returns reflectance relative to paper white (1.0 = paper base).
 pub fn print(negative: &Negative, settings: &PrintSettings) -> Plane {
-    let Paper { d_min, d_max } = settings.paper;
-    let k = 2.0 * 19f64.ln() / settings.log_exposure_range();
+    let d_min = settings.paper.d_min;
     let q = settings.callier_q;
     let offset = std::f64::consts::LOG10_2 * settings.exposure_adjust_stops
         + match settings.exposure {
             PrintExposure::LogOffset(o) => o,
             PrintExposure::MidGreyAt { print_density } => {
-                let frac = ((print_density - d_min) / (d_max - d_min)).clamp(1e-4, 1.0 - 1e-4);
-                (frac / (1.0 - frac)).ln() / k + q * negative.grey_density
+                settings.log_exposure_for(print_density) + q * negative.grey_density
+            }
+            PrintExposure::BaseAt { print_density } => {
+                settings.log_exposure_for(print_density) + q * negative.base_plus_fog
             }
         };
     let mut out = negative.density.zeros_like();
@@ -83,8 +108,7 @@ pub fn print(negative: &Negative, settings: &PrintSettings) -> Plane {
         .par_iter_mut()
         .zip(negative.density.data().par_iter())
         .for_each(|(r, &d)| {
-            let log_h = offset - q * f64::from(d);
-            let dp = d_min + (d_max - d_min) / (1.0 + (-k * log_h).exp());
+            let dp = settings.density_at(offset - q * f64::from(d));
             *r = 10f64.powf(-(dp - d_min)) as f32;
         });
     out
@@ -105,5 +129,13 @@ mod tests {
             ..Default::default()
         };
         assert!(hard.log_exposure_range() < soft.log_exposure_range());
+    }
+
+    #[test]
+    fn log_exposure_for_inverts_density_at() {
+        let s = PrintSettings::default();
+        for d in [0.1, 0.75, 1.5, 2.0] {
+            assert!((s.density_at(s.log_exposure_for(d)) - d).abs() < 1e-9);
+        }
     }
 }

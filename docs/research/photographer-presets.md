@@ -17,7 +17,7 @@ chemistry or paper. The app's components cover film, film developer, push/pull, 
 grade, print exposure and scene contrast. It has **no paper-developer, toner, filter or dodge/burn control**. Where
 the record says those mattered (amidol, selenium, yellow or red filters, heavy burning), the closest proxy is noted.
 
-App vocabulary used below: film ids as in the app; push in whole stops relative to box speed; format = film width
+App vocabulary used below: film ids as in the app; push in whole stops relative to box speed (since 0.5, development for that EI with the film exposed at box speed: Zone System N+/N−); format = film width
 in mm (36 = 35mm, 56 = 6x6/645 roll film, 70 = 6x7, 120 = 4x5, 203 = 8x10); crop = enlargement crop factor
 (1.0 = full frame); paper grade 0-5 (2 = normal); print exposure in stops (+ = darker); scene contrast -100..+100.
 
@@ -185,7 +185,7 @@ Crop 1.3 reflects his documented cropping.
 **Basis:** Documented: cinema film in the Czechoslovak years (Koudelka, Aperture 2008), 35mm with a 25 mm wide-angle,
 and very high-contrast negatives printed to "relatively high contrast" with detail at both ends (printer Voja Mitrović,
 via *The Online Photographer*). Substitution: the East German stock (unnamed, likely ORWO) is not in the app. Eastman
-`double-x` is chosen because it is itself a motion-picture negative film. Push +2 (EI 1000 from 250) with HC-110 B and
+`double-x` is chosen because it is itself a motion-picture negative film. Push +2 (developed as for EI 1000 from 250) with HC-110 B and
 frequent agitation interprets the secondary report of pushing "as far as possible in a hot developer". Grade 3 rather
 than 4 stands in for Mitrović's heavy burning and dodging, which held detail; the app cannot model that.
 
