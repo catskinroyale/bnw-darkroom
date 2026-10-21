@@ -126,6 +126,42 @@ pub struct RawAdjust {
     pub highlights: Highlights,
     /// Extra clockwise quarter turns on top of the camera's orientation.
     pub rotation: u8,
+    /// Scene contrast, −100…+100: a power curve on luminance around mid-grey (18 %),
+    /// applied before the film, like changing the lighting ratio. 0 leaves the scene alone.
+    #[serde(default)]
+    pub contrast: f64,
+}
+
+/// Luminance power `(Y / 0.18)^(γ − 1)` with `γ = 1.5^(contrast / 100)`: ±100 gives a
+/// gamma of 1.5 or 1/1.5 around mid-grey. Colour ratios are kept (each pixel's channels
+/// are scaled by the same factor), so the film's colour-to-grey conversion is unchanged.
+pub fn apply_contrast(scene: &mut SceneImage, contrast: f64) {
+    if contrast.abs() < 1e-9 {
+        return;
+    }
+    let exponent = (1.5f64.powf(contrast.clamp(-100.0, 100.0) / 100.0) - 1.0) as f32;
+    let factor = move |y: f32| {
+        if y <= 1e-6 {
+            1.0
+        } else {
+            (y / 0.18).powf(exponent).clamp(0.0, 64.0)
+        }
+    };
+    match scene {
+        SceneImage::Mono { y } => y.data_mut().par_iter_mut().for_each(|v| *v *= factor(*v)),
+        SceneImage::Rgb { r, g, b } => {
+            r.data_mut()
+                .par_iter_mut()
+                .zip(g.data_mut().par_iter_mut())
+                .zip(b.data_mut().par_iter_mut())
+                .for_each(|((r, g), b)| {
+                    let f = factor(0.2126 * *r + 0.7152 * *g + 0.0722 * *b);
+                    *r *= f;
+                    *g *= f;
+                    *b *= f;
+                });
+        }
+    }
 }
 
 impl Default for RawAdjust {
@@ -135,6 +171,7 @@ impl Default for RawAdjust {
             white_balance: WhiteBalance::AsShot,
             highlights: Highlights::Reconstruct,
             rotation: 0,
+            contrast: 0.0,
         }
     }
 }
@@ -459,6 +496,8 @@ impl RawPhoto {
                 }
             }
         };
+        let mut scene = scene;
+        apply_contrast(&mut scene, adjust.contrast);
         let (flip, turns) = exif_transform(self.orientation);
         bw_io::transform(&scene, flip, (turns + adjust.rotation) % 4)
     }
@@ -467,11 +506,12 @@ impl RawPhoto {
 /// Exposure and rotation for non-raw (already rendered) images. White balance and
 /// highlight reconstruction need raw data and are not applied.
 pub fn adjust_rendered(scene: &SceneImage, adjust: &RawAdjust) -> SceneImage {
-    let scaled = if adjust.exposure_ev == 0.0 {
+    let mut scaled = if adjust.exposure_ev == 0.0 {
         scene.clone()
     } else {
         bw_io::scale(scene, 2f32.powf(adjust.exposure_ev as f32))
     };
+    apply_contrast(&mut scaled, adjust.contrast);
     bw_io::transform(&scaled, false, adjust.rotation % 4)
 }
 
@@ -528,11 +568,45 @@ mod tests {
             },
             highlights: Highlights::Clip,
             rotation: 3,
+            contrast: 25.0,
         };
+        // Sidecars written before the contrast control load with contrast 0.
+        let old: RawAdjust = serde_json::from_str(
+            r#"{"exposure_ev":0.5,"white_balance":{"mode":"as-shot"},"highlights":"clip","rotation":0}"#,
+        )
+        .unwrap();
+        assert_eq!(old.contrast, 0.0);
         let json = serde_json::to_string(&a).unwrap();
         assert!(json.contains("\"mode\":\"custom\""), "{json}");
         let back: RawAdjust = serde_json::from_str(&json).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    fn contrast_pivots_on_mid_grey_and_keeps_colour_ratios() {
+        let y = Plane::from_fn(3, 1, |x, _| [0.045, 0.18, 0.72][x]).unwrap();
+        let mut scene = SceneImage::Mono { y };
+        apply_contrast(&mut scene, 100.0);
+        let SceneImage::Mono { y } = &scene else {
+            unreachable!()
+        };
+        assert!((y.get(1, 0) - 0.18).abs() < 1e-6, "mid-grey fixed");
+        // Two stops either side of grey move to three stops (γ = 1.5).
+        assert!((y.get(0, 0) / 0.18 - 0.125).abs() < 1e-3);
+        assert!((y.get(2, 0) / 0.18 - 8.0).abs() < 1e-2);
+
+        let one = |v| Plane::filled(1, 1, v).unwrap();
+        let mut rgb = SceneImage::Rgb {
+            r: one(0.4),
+            g: one(0.2),
+            b: one(0.1),
+        };
+        apply_contrast(&mut rgb, -60.0);
+        let SceneImage::Rgb { r, g, b } = &rgb else {
+            unreachable!()
+        };
+        assert!((r.get(0, 0) / g.get(0, 0) - 2.0).abs() < 1e-5);
+        assert!((g.get(0, 0) / b.get(0, 0) - 2.0).abs() < 1e-5);
     }
 
     #[test]

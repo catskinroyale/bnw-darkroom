@@ -9,6 +9,7 @@ use crate::source::Source;
 
 mod help {
     pub const EXPOSURE: &str = "Brightens or darkens the scene before it reaches the film, in stops.\nUse it to correct the camera's exposure; push and pull are set in the workflow.";
+    pub const CONTRAST: &str = "Scene contrast before the film, around mid-grey, like changing the lighting ratio.\nThe film and paper still shape the print; use paper grade for print contrast.";
     pub const AUTO_EXPOSURE: &str =
         "Set exposure like an averaging meter: the scene's average brightness becomes mid-grey.";
     pub const WB: &str = "Which light counts as neutral. Film turns colours into greys,\nso white balance changes which tones come out lighter or darker.";
@@ -101,6 +102,12 @@ pub fn show(
         {
             adjust.exposure_ev = auto_exposure(source, adjust);
         }
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Contrast").on_hover_text(help::CONTRAST);
+        ui.add(egui::Slider::new(&mut adjust.contrast, -100.0..=100.0).step_by(5.0))
+            .on_hover_text(help::CONTRAST);
     });
 
     let raw = source.raw();

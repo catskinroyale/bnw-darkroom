@@ -21,6 +21,7 @@ use bw_raw::RawAdjust;
 
 const KEY_FOLDER: &str = "folder";
 const KEY_VIEW: &str = "workflow_view";
+const KEY_THEME: &str = "theme";
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
@@ -68,7 +69,7 @@ pub struct App {
     /// Display label of the draft's developer, for export file names.
     developer_label: String,
     /// Workflow panel shows every control rather than the simple chips.
-    detailed: bool,
+    view: workflow::View,
     /// Long edge, in pixels, the preview is rendered at (follows the screen size).
     preview_edge: usize,
 
@@ -95,7 +96,9 @@ pub struct App {
     exports_running: usize,
     status: String,
 
+    presets: Vec<bw_profiles::Preset>,
     about: crate::about::About,
+    theme: egui::ThemePreference,
     #[cfg(target_os = "macos")]
     menu: Option<crate::menu::AppMenu>,
 
@@ -127,7 +130,7 @@ impl App {
             .or_else(dirs::picture_dir)
             .or_else(dirs::home_dir)
             .unwrap_or_else(|| PathBuf::from("/"));
-        let detailed = get(KEY_VIEW).is_some_and(|v| v == "detailed");
+        let view = workflow::View::from_key(get(KEY_VIEW).as_deref().unwrap_or(""));
         let export = get(KEY_EXPORT)
             .and_then(|s| serde_json::from_str::<ExportSettings>(&s).ok())
             .unwrap_or_else(|| ExportSettings {
@@ -164,7 +167,8 @@ impl App {
             summary: draft.model_summary().ok(),
             developer_label: bw_profiles::developer_label(&draft.developer),
             draft,
-            detailed,
+            view,
+            presets: bw_profiles::photographer_presets(),
             preview_edge: 1600,
             preview_generation: 0,
             preview: None,
@@ -183,11 +187,17 @@ impl App {
             exports_running: 0,
             status: String::new(),
             about: Default::default(),
+            theme: match get(KEY_THEME).as_deref() {
+                Some("light") => egui::ThemePreference::Light,
+                Some("dark") => egui::ThemePreference::Dark,
+                _ => egui::ThemePreference::System,
+            },
             #[cfg(target_os = "macos")]
             menu: crate::menu::AppMenu::install(&cc.egui_ctx),
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
+        cc.egui_ctx.set_theme(app.theme);
         app.open_folder(folder);
         if let Some(image) = start_image {
             app.select_image(image);
@@ -320,6 +330,28 @@ impl App {
             styles: self.store.styles(),
             adjust: self.adjust,
         });
+    }
+
+    /// Apply a photographer preset: select its built-in style (or use it as the draft)
+    /// and set the image contrast it calls for.
+    fn apply_preset(&mut self, index: usize) {
+        let preset = self.presets[index].clone();
+        match self
+            .store
+            .entries
+            .iter()
+            .position(|e| e.builtin && e.style.name == preset.style.name)
+        {
+            Some(i) => self.select_style(i),
+            None => {
+                self.draft = preset.style;
+                self.draft_changed();
+            }
+        }
+        if preset.scene_contrast != 0.0 && self.adjust.contrast != preset.scene_contrast {
+            self.adjust.contrast = preset.scene_contrast;
+            self.adjust_changed();
+        }
     }
 
     fn select_style(&mut self, index: usize) {
@@ -664,6 +696,22 @@ impl App {
         let Some((path, started, requested)) = &mut self.screenshot else {
             return;
         };
+        // `BW_DARKROOM_SCREENSHOT_THEME=dark|light` and `…_VIEW=simple|detailed|photographers`
+        // set the theme and workflow view for the shot (not saved: test runs don't persist).
+        if let Some(theme) = std::env::var_os("BW_DARKROOM_SCREENSHOT_THEME") {
+            let theme = if theme == "dark" {
+                egui::ThemePreference::Dark
+            } else {
+                egui::ThemePreference::Light
+            };
+            if self.theme != theme {
+                self.theme = theme;
+                ctx.set_theme(theme);
+            }
+        }
+        if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
+            self.view = workflow::View::from_key(&view.to_string_lossy());
+        }
         // `BW_DARKROOM_SCREENSHOT_ABOUT=1` opens the About window for the shot.
         if std::env::var_os("BW_DARKROOM_SCREENSHOT_ABOUT").is_some() {
             self.about.open = true;
@@ -717,6 +765,28 @@ impl App {
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can_export = self.loaded.is_some();
+                let mut theme = self.theme;
+                for (choice, label, help) in [
+                    (
+                        egui::ThemePreference::Dark,
+                        "Dark",
+                        "Dark interface: easier on the eyes when judging prints in a dim room",
+                    ),
+                    (egui::ThemePreference::Light, "Light", "Light interface"),
+                    (
+                        egui::ThemePreference::System,
+                        "Auto",
+                        "Follow the system appearance (light or dark)",
+                    ),
+                ] {
+                    ui.selectable_value(&mut theme, choice, label)
+                        .on_hover_text(help);
+                }
+                if theme != self.theme {
+                    self.theme = theme;
+                    ui.ctx().set_theme(theme);
+                }
+                ui.separator();
                 if ui
                     .add_enabled(can_export, egui::Button::new("Export…"))
                     .on_hover_text(
@@ -807,7 +877,7 @@ impl App {
                             ui,
                             &mut self.adjust,
                             source.as_deref(),
-                            self.detailed,
+                            self.view == workflow::View::Detailed,
                         ) {
                             self.adjust_changed();
                         }
@@ -840,28 +910,31 @@ impl App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.heading("Workflow");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                });
+                ui.horizontal(|ui| {
+                    for (view, label, help) in workflow::View::ALL {
                         if ui
-                            .add(egui::Button::selectable(self.detailed, "Detailed"))
-                            .on_hover_text("Every processing and printing control")
+                            .add(egui::Button::selectable(self.view == view, label))
+                            .on_hover_text(help)
                             .clicked()
                         {
-                            self.detailed = true;
+                            self.view = view;
                         }
-                        if ui
-                            .add(egui::Button::selectable(!self.detailed, "Simple"))
-                            .on_hover_text("Film, developer, push/pull and grain as quick choices")
-                            .clicked()
-                        {
-                            self.detailed = false;
-                        }
-                    });
+                    }
                 });
                 let before = self.draft.clone();
-                if self.detailed {
-                    workflow::detailed(ui, &mut self.draft, self.summary.as_ref());
-                } else {
-                    workflow::simple(ui, &mut self.draft, self.summary.as_ref());
+                match self.view {
+                    workflow::View::Detailed => {
+                        workflow::detailed(ui, &mut self.draft, self.summary.as_ref());
+                    }
+                    workflow::View::Simple => {
+                        workflow::simple(ui, &mut self.draft, self.summary.as_ref());
+                    }
+                    workflow::View::Photographers => {
+                        if let Some(i) = workflow::photographers(ui, &self.draft, &self.presets) {
+                            self.apply_preset(i);
+                        }
+                    }
                 }
                 if self.draft != before {
                     self.draft_changed();
@@ -1178,10 +1251,13 @@ impl eframe::App for App {
         }
         self.save_adjust();
         storage.set_string(KEY_FOLDER, self.folder.display().to_string());
-        storage.set_string(
-            KEY_VIEW,
-            if self.detailed { "detailed" } else { "simple" }.into(),
-        );
+        storage.set_string(KEY_VIEW, self.view.key().into());
+        let theme = match self.theme {
+            egui::ThemePreference::Light => "light",
+            egui::ThemePreference::Dark => "dark",
+            egui::ThemePreference::System => "system",
+        };
+        storage.set_string(KEY_THEME, theme.into());
         let flag = |b: bool| if b { '1' } else { '0' };
         storage.set_string(
             KEY_PANELS,

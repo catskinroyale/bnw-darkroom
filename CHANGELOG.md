@@ -5,6 +5,25 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Kentmere Pan 100, 200 and 400** films (illustrative models; Harman publishes no curves
+  or granularity), with 85 Massive Dev Chart rows and Harman data-sheet findings
+  (`docs/research/kentmere.md`). Kentmere HC-110 rows labelled "1+31" count as dilution B.
+- **Photographer presets** as a third Workflow view, **Photographers**: Don McCullin,
+  Ansel Adams, Bill Brandt, Josef Koudelka and Edward Weston. Each preset is an ordinary
+  film/developer/process/print recipe with a note separating documented practice from
+  interpretation (`docs/research/photographer-presets.md`); presets also appear as
+  built-in styles.
+- **Contrast** in the Image panel: scene contrast around mid-grey (−100…+100), applied
+  before the film on luminance so colour-to-grey conversion is unchanged; saved in sidecars
+  (older sidecars load as 0). Presets can set it.
+- **Dark mode**: Auto / Light / Dark toggle in the top bar, remembered between sessions.
+- **8×10** film format (203 mm), for contact-print workflows.
+
+### Changed
+- The 56 mm format is labelled "6×6 / 645".
+- Development-time table: 293 curated rows.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

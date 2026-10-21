@@ -31,7 +31,7 @@ mod help {
 }
 
 /// Display order and short names for films.
-const FILMS: [(&str, &str, &str); 9] = [
+const FILMS: [(&str, &str, &str); 12] = [
     (
         "tri-x",
         "Tri-X",
@@ -46,6 +46,21 @@ const FILMS: [(&str, &str, &str); 9] = [
         "tmax-400",
         "T-Max 400",
         "Kodak tabular-grain ISO 400 film: fine grain for its speed, crisp and clean, pushes well.",
+    ),
+    (
+        "kentmere-100",
+        "Kentmere 100",
+        "Harman's budget ISO 100 traditional-grain film: fine grain, classic tones.",
+    ),
+    (
+        "kentmere-200",
+        "Kentmere 200",
+        "Harman's ISO 200 traditional-grain film: a middle ground of speed and grain.",
+    ),
+    (
+        "kentmere-400",
+        "Kentmere 400",
+        "Harman's budget ISO 400 film: visible grain and a gentler curve; pushes reasonably.",
     ),
     (
         "hp5",
@@ -79,16 +94,16 @@ const FILMS: [(&str, &str, &str); 9] = [
     ),
 ];
 
-const FORMATS: [(&str, f64, &str); 4] = [
+const FORMATS: [(&str, f64, &str); 5] = [
     (
         "35 mm",
         36.0,
         "36 × 24 mm frame: the most grain for a given print size.",
     ),
     (
-        "645",
+        "6×6 / 645",
         56.0,
-        "56 × 42 mm medium-format frame: about 1.6× less enlargement than 35 mm.",
+        "56 mm wide medium-format frame (6×6 or 645): about 1.6× less enlargement than 35 mm.",
     ),
     (
         "6×7",
@@ -100,7 +115,116 @@ const FORMATS: [(&str, f64, &str); 4] = [
         120.0,
         "4 × 5 inch sheet film: almost grainless at normal print sizes.",
     ),
+    (
+        "8×10",
+        203.0,
+        "8 × 10 inch sheet film, often contact printed: no visible grain.",
+    ),
 ];
+
+/// Which form the Workflow panel takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Simple,
+    Detailed,
+    Photographers,
+}
+
+impl View {
+    pub const ALL: [(View, &'static str, &'static str); 3] = [
+        (
+            View::Simple,
+            "Simple",
+            "Film, developer, push/pull and grain as quick choices",
+        ),
+        (
+            View::Detailed,
+            "Detailed",
+            "Every processing and printing control",
+        ),
+        (
+            View::Photographers,
+            "Photographers",
+            "Presets inspired by photographers' documented materials and printing",
+        ),
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            View::Simple => "simple",
+            View::Detailed => "detailed",
+            View::Photographers => "photographers",
+        }
+    }
+
+    pub fn from_key(key: &str) -> View {
+        match key {
+            "detailed" => View::Detailed,
+            "photographers" => View::Photographers,
+            _ => View::Simple,
+        }
+    }
+}
+
+/// Photographer presets: each card shows the look and what is documented versus
+/// interpreted. Returns the index of the preset to apply.
+pub fn photographers(
+    ui: &mut egui::Ui,
+    current: &Style,
+    presets: &[bw_profiles::Preset],
+) -> Option<usize> {
+    let mut chosen = None;
+    ui.label(
+        egui::RichText::new(
+            "Recipes built from the app's film, developer and printing models, informed by each \
+             photographer's documented practice. They are interpretations, not reproductions.",
+        )
+        .small()
+        .weak(),
+    );
+    for (i, p) in presets.iter().enumerate() {
+        let selected = current.name == p.style.name;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(p.photographer).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = if selected { "Applied" } else { "Apply" };
+                    if ui
+                        .add(egui::Button::selectable(selected, label))
+                        .on_hover_text("Use this film, developer, processing and print recipe")
+                        .clicked()
+                    {
+                        chosen = Some(i);
+                    }
+                });
+            });
+            ui.label(egui::RichText::new(p.look).small());
+            let s = &p.style;
+            let mut recipe = format!(
+                "{} · {} · EI {:.0} · {} · grade {:.1}",
+                bw_profiles::film_label(&s.film),
+                bw_profiles::developer_label(&s.developer),
+                s.exposure_index,
+                FORMATS
+                    .iter()
+                    .find(|(_, mm, _)| (s.format_mm - mm).abs() < 0.5)
+                    .map_or("custom format", |f| f.0),
+                s.print.grade
+            );
+            if p.scene_contrast != 0.0 {
+                recipe.push_str(&format!(" · scene contrast {:+.0}", p.scene_contrast));
+            }
+            ui.label(egui::RichText::new(recipe).small().weak());
+            egui::CollapsingHeader::new(egui::RichText::new("What's documented").small())
+                .id_salt(("basis", i))
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(p.basis).small());
+                });
+        });
+    }
+    chosen
+}
 
 const CROPS: [(&str, f64); 4] = [("Full frame", 1.0), ("1.5×", 1.5), ("2×", 2.0), ("3×", 3.0)];
 

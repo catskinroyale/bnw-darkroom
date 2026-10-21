@@ -163,6 +163,64 @@ hp5,rodinal,1+50,400,13.00,20,MDC median of 2
 hp5,rodinal,1+50,800,16.00,20,MDC
 hp5,rodinal,1+50,1600,24.00,20,MDC
 hp5,rodinal,1+50,6400,69.00,20,MDC median of 2
+kentmere-100,d76,1+1,50,8.50,20,MDC
+kentmere-100,d76,1+1,100,11.50,20,MDC
+kentmere-100,d76,1+1,200,15.50,20,MDC
+kentmere-100,d76,1+1,400,20.00,20,MDC
+kentmere-100,d76,1+1,800,27.00,20,MDC
+kentmere-100,d76,stock,50,7.00,20,MDC
+kentmere-100,d76,stock,100,9.00,20,MDC
+kentmere-100,d76,stock,200,11.00,20,MDC
+kentmere-100,fx55,1+9,100,10.00,20,MDC
+kentmere-100,hc110,B,100,6.50,20,MDC median of 3
+kentmere-100,hc110,B,200,8.00,20,MDC
+kentmere-100,hc110,B,400,10.00,20,MDC
+kentmere-100,hc110,H,100,16.00,20,MDC
+kentmere-100,hc110,H,400,20.00,20,MDC
+kentmere-100,rodinal,1+25,100,9.00,20,MDC median of 2
+kentmere-100,rodinal,1+25,200,13.00,20,MDC
+kentmere-100,rodinal,1+25,3200,70.00,20,MDC
+kentmere-100,rodinal,1+50,25,4.50,20,MDC
+kentmere-100,rodinal,1+50,50,9.00,20,MDC
+kentmere-100,rodinal,1+50,100,15.00,20,MDC median of 2
+kentmere-100,rodinal,1+50,200,20.00,20,MDC
+kentmere-100,rodinal,1+50,400,25.00,20,MDC
+kentmere-200,d76,1+1,100,6.00,20,MDC
+kentmere-200,d76,stock,100,5.00,20,MDC
+kentmere-200,d76,stock,200,7.50,20,MDC
+kentmere-200,hc110,B,200,5.00,20,MDC
+kentmere-200,hc110,B,400,7.50,20,MDC
+kentmere-200,hc110,B,800,11.50,20,MDC
+kentmere-200,hc110,E,200,8.00,20,MDC
+kentmere-200,rodinal,1+25,200,10.00,20,MDC
+kentmere-400,d76,1+1,400,14.00,20,MDC
+kentmere-400,d76,1+1,800,17.00,20,MDC
+kentmere-400,d76,1+1,1600,22.00,20,MDC
+kentmere-400,d76,stock,50,5.50,20,MDC
+kentmere-400,d76,stock,200,8.50,20,MDC
+kentmere-400,d76,stock,400,9.50,20,MDC
+kentmere-400,d76,stock,800,12.50,20,MDC
+kentmere-400,d76,stock,1600,20.00,20,MDC
+kentmere-400,d96,stock,400,6.97,20,MDC median of 2
+kentmere-400,fx55,1+9,400,13.00,20,MDC
+kentmere-400,fx55,stock,1600,17.00,20,MDC
+kentmere-400,hc110,B,200,3.50,20,MDC
+kentmere-400,hc110,B,400,5.50,20,MDC
+kentmere-400,hc110,B,800,10.00,20,MDC
+kentmere-400,hc110,B,1600,14.00,20,MDC median of 2
+kentmere-400,hc110,B,3200,15.00,20,MDC
+kentmere-400,hc110,E,400,8.50,20,MDC
+kentmere-400,hc110,E,800,13.00,20,MDC
+kentmere-400,hc110,H,25,7.50,20,MDC
+kentmere-400,hc110,H,50,8.50,20,MDC
+kentmere-400,hc110,H,200,10.00,20,MDC
+kentmere-400,rodinal,1+25,400,9.50,20,MDC median of 2
+kentmere-400,rodinal,1+25,1600,25.00,20,MDC
+kentmere-400,rodinal,1+25,3200,32.75,20,MDC
+kentmere-400,rodinal,1+50,50,10.50,20,MDC
+kentmere-400,rodinal,1+50,100,13.00,20,MDC
+kentmere-400,rodinal,1+50,400,14.50,20,MDC median of 2
+kentmere-400,rodinal,1+50,800,19.00,20,MDC
 tmax-100,d76,1+1,100,9.50,20,MDC
 tmax-100,d76,stock,100,6.50,20,MDC
 tmax-100,d76,stock,200,6.50,20,MDC

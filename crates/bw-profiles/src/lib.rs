@@ -386,6 +386,166 @@ pub fn developer_label(id: &str) -> String {
     )
 }
 
+/// A photographer-inspired preset: an ordinary [`Style`] plus the reasoning behind it.
+/// Presets compose existing components; they have no rendering logic of their own.
+#[derive(Clone, Debug)]
+pub struct Preset {
+    pub photographer: &'static str,
+    /// One line describing the look.
+    pub look: &'static str,
+    /// Which parts are documented (with sources) and which are interpretation.
+    pub basis: &'static str,
+    /// Image ▸ Contrast to set when the preset is applied (0 = leave as is).
+    pub scene_contrast: f64,
+    pub style: Style,
+}
+
+/// Photographer presets. Every value is an interpretation built from the app's own
+/// components; sources and the documented/undocumented split are in
+/// `docs/research/photographer-presets.md`.
+pub fn photographer_presets() -> Vec<Preset> {
+    #[allow(clippy::too_many_arguments)]
+    fn style(
+        name: &str,
+        film: &str,
+        developer: &str,
+        push: f64,
+        agitation: AgitationSpec,
+        format_mm: f64,
+        crop: f64,
+        grade: f64,
+        print_stops: f64,
+    ) -> Style {
+        let mut s = Style {
+            name: name.into(),
+            film: film.into(),
+            developer: developer.into(),
+            exposure_index: 400.0,
+            ev_compensation: 0.0,
+            development: DevelopmentSpec {
+                time_min: None,
+                temperature_c: 20.0,
+                agitation,
+            },
+            print: PrintSpec {
+                grade,
+                exposure_stops: print_stops,
+            },
+            seed: 1,
+            format_mm,
+            crop,
+        };
+        s.set_push_stops(push);
+        s
+    }
+    let every = |interval_s| AgitationSpec::Intermittent { interval_s };
+    vec![
+        Preset {
+            photographer: "Don McCullin",
+            look: "Dark, heavy, brooding prints with dense shadows and gritty 35 mm grain.",
+            basis: "Documented: Tri-X in a Nikon F (he took thirty rolls to Vietnam); a yellow filter; \
+                    deliberately dark prints (\"Darkness, to me, is energy\") with heavy dodging and \
+                    burning, all printed himself. Not documented: developer and paper. HC-110 B, grade 3, \
+                    +1 stop print exposure and scene contrast stand in for his printing.",
+            scene_contrast: 20.0,
+            style: style(
+                "Inspired by Don McCullin",
+                "tri-x",
+                "hc110-b",
+                0.0,
+                every(30.0),
+                36.0,
+                1.2,
+                3.0,
+                1.0,
+            ),
+        },
+        Preset {
+            photographer: "Ansel Adams",
+            look: "Full-scale large-format landscape: deep skies, separated tones, no visible grain.",
+            basis: "Documented: the Zone System; HC-110 recommended in The Negative; Moonrise shot on 8×10 \
+                    with water-bath development; later prints cooler, more contrasty and glossy, with \
+                    Dektol and selenium toning. Interpretation: FP4 stands in for Isopan, and HC-110 \
+                    dilution H with sparse agitation for dilution G and the water bath. No selenium toning \
+                    or filters in the app.",
+            scene_contrast: 15.0,
+            style: style(
+                "Inspired by Ansel Adams",
+                "fp4",
+                "hc110-h",
+                0.0,
+                every(60.0),
+                203.0,
+                1.0,
+                3.0,
+                0.5,
+            ),
+        },
+        Preset {
+            photographer: "Bill Brandt",
+            look: "Stark post-war contrast: chalky highlights, crushed blacks, mid-tones sacrificed.",
+            basis: "Documented: \"Before 1951, I liked my prints dark and muddy. Now I prefer the very \
+                    contrasting black-and-white effect\"; compositions finished and cropped under the \
+                    enlarger; very high-contrast Shadow of Light prints; 6×6 cameras (Rolleiflex, \
+                    Hasselblad). Not documented: film and developer. Grade 5 and strong scene contrast \
+                    are interpretation.",
+            scene_contrast: 40.0,
+            style: style(
+                "Inspired by Bill Brandt",
+                "hp5",
+                "d76-stock",
+                1.0,
+                every(30.0),
+                56.0,
+                1.3,
+                5.0,
+                0.5,
+            ),
+        },
+        Preset {
+            photographer: "Josef Koudelka",
+            look: "Hard, grainy wide-angle reportage: deep blacks with detail held at both ends.",
+            basis: "Documented: cinema film in 1968 (Aperture); 35 mm with a 25 mm wide-angle; his \
+                    printer describes high-contrast negatives printed to relatively high contrast with \
+                    detail in highlights and shadows. Reported in one secondary source only: East German \
+                    400 movie film pushed in hot developer. Double-X, itself a motion-picture film, pushed \
+                    two stops stands in.",
+            scene_contrast: 25.0,
+            style: style(
+                "Inspired by Josef Koudelka",
+                "double-x",
+                "hc110-b",
+                2.0,
+                every(30.0),
+                36.0,
+                1.0,
+                3.0,
+                0.5,
+            ),
+        },
+        Preset {
+            photographer: "Edward Weston",
+            look: "8×10 contact print: luminous, finely detailed tones with long, smooth gradation.",
+            basis: "Documented: an 8×10 view camera; pyro-soda tray development by inspection; contact \
+                    prints only, under a bare bulb; amidol print developer; a move from matte palladium \
+                    to glossy prints. Not documented: film stock. The app has no pyro: Rodinal 1+50 is the \
+                    nearest high-acutance developer that holds highlights, without pyro's stain.",
+            scene_contrast: 0.0,
+            style: style(
+                "Inspired by Edward Weston",
+                "fp4",
+                "rodinal-1+50",
+                0.0,
+                every(60.0),
+                203.0,
+                1.0,
+                2.0,
+                0.0,
+            ),
+        },
+    ]
+}
+
 /// The styles shipped with the app. Named by process, not by photographer: profiles
 /// attributed to photographers need documented sources (design 0001, brief §5).
 pub fn builtin_styles() -> Vec<Style> {
@@ -448,6 +608,7 @@ pub fn builtin_styles() -> Vec<Style> {
         agitation: AgitationSpec::Stand,
     };
     styles.push(stand);
+    styles.extend(photographer_presets().into_iter().map(|p| p.style));
     // Only ship styles whose film/developer pair has a published time.
     styles.retain(Style::is_available);
     styles
@@ -464,6 +625,31 @@ mod tests {
             let json = serde_json::to_string(&style).unwrap();
             let back: Style = serde_json::from_str(&json).unwrap();
             assert_eq!(back, style);
+        }
+    }
+
+    #[test]
+    fn photographer_presets_are_renderable_builtins() {
+        let presets = photographer_presets();
+        assert_eq!(presets.len(), 5);
+        let builtins = builtin_styles();
+        for p in &presets {
+            let summary = p
+                .style
+                .model_summary()
+                .unwrap_or_else(|e| panic!("{}: {e}", p.photographer));
+            assert!(summary.iso.is_some(), "{}", p.photographer);
+            assert!(
+                builtins.iter().any(|s| s.name == p.style.name),
+                "{} not in builtins",
+                p.photographer
+            );
+            assert!(
+                !p.basis.is_empty() && p.basis.contains("ocumented"),
+                "{}",
+                p.photographer
+            );
+            assert!((-100.0..=100.0).contains(&p.scene_contrast));
         }
     }
 

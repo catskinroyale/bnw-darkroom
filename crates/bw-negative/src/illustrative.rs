@@ -19,7 +19,7 @@ use bw_film::{FilmStock, GrainParams, SpectralWeights};
 
 use crate::times;
 
-pub const FILMS: [&str; 9] = [
+pub const FILMS: [&str; 12] = [
     "tri-x",
     "tmax-100",
     "tmax-400",
@@ -29,6 +29,9 @@ pub const FILMS: [&str; 9] = [
     "delta-400",
     "delta-3200",
     "double-x",
+    "kentmere-100",
+    "kentmere-200",
+    "kentmere-400",
 ];
 
 /// Developer combinations (developer + dilution).
@@ -106,6 +109,12 @@ fn film_spec(id: &str) -> Option<FilmSpec> {
             weights: w(0.22, 0.58, 0.20), irradiation_um: 1.6, rms_granularity: 8.0 / 0.948_7, normal_gradient: 0.60, toe: 0.16 },
         "tmax-400" => FilmSpec { id: "tmax-400", name: "T-Max-400-like", iso: 400.0, box_ei: 400.0, base: 0.22,
             weights: w(0.23, 0.57, 0.20), irradiation_um: 2.2, rms_granularity: 10.0 / 0.948_7, normal_gradient: 0.60, toe: 0.18 },
+        "kentmere-100" => FilmSpec { id: "kentmere-100", name: "Kentmere-100-like", iso: 100.0, box_ei: 100.0, base: 0.21,
+            weights: w(0.25, 0.55, 0.20), irradiation_um: 2.4, rms_granularity: 11.0, normal_gradient: 0.62, toe: 0.24 },
+        "kentmere-200" => FilmSpec { id: "kentmere-200", name: "Kentmere-200-like", iso: 200.0, box_ei: 200.0, base: 0.22,
+            weights: w(0.25, 0.55, 0.20), irradiation_um: 2.8, rms_granularity: 14.0, normal_gradient: 0.60, toe: 0.27 },
+        "kentmere-400" => FilmSpec { id: "kentmere-400", name: "Kentmere-400-like", iso: 400.0, box_ei: 400.0, base: 0.23,
+            weights: w(0.26, 0.54, 0.20), irradiation_um: 3.3, rms_granularity: 19.0, normal_gradient: 0.56, toe: 0.30 },
         "hp5" => FilmSpec { id: "hp5", name: "HP5-like 400", iso: 400.0, box_ei: 400.0, base: 0.22,
             weights: w(0.26, 0.54, 0.20), irradiation_um: 3.2, rms_granularity: 18.0, normal_gradient: 0.56, toe: 0.32 },
         "fp4" => FilmSpec { id: "fp4", name: "FP4-like 125", iso: 125.0, box_ei: 125.0, base: 0.20,
