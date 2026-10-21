@@ -12,6 +12,7 @@ mod image_panel;
 #[cfg(target_os = "macos")]
 mod menu;
 mod source;
+mod style_menu;
 mod styles;
 mod version;
 mod worker;

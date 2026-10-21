@@ -5,6 +5,19 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Style menu (…)** on every row of the Styles list, and on right-click of a gallery
+  tile: **Edit…** (an editor window with every setting and a live preview), **Duplicate**,
+  **Rename…**, **Export…** (a `.json` file), **Move up / Move down** (your own styles) and
+  **Delete…** (with confirmation). Built-in styles are read-only: rename, move and delete
+  are disabled with an explanation; duplicate one to change it.
+- **Import…** in the Styles section adds styles from exported `.json` files (one style or a
+  list), renaming any that clash.
+
+### Fixed
+- Screenshot test runs no longer save panel sizes and window positions into the user's
+  settings.
+
 ## [0.3.1] - 2026-10-21
 
 ### Added

@@ -14,6 +14,7 @@ use eframe::egui::{self, Color32, Pos2, Sense, Stroke, TextureHandle, TextureOpt
 use crate::browser::{self, Entry, ThumbRequest};
 use crate::export::{Conflict, ExportSettings, Format, NameContext, TOKENS, resolve_conflict};
 use crate::source::Source;
+use crate::style_menu::{self, StyleAction};
 use crate::styles::StyleStore;
 use crate::worker::{self, Job, Msg};
 use crate::workflow;
@@ -105,6 +106,14 @@ pub struct App {
     status: String,
 
     presets: Vec<bw_profiles::Preset>,
+    /// Style being renamed: index, text field, validation error.
+    rename_dialog: Option<(usize, String, Option<String>)>,
+    /// Style waiting for delete confirmation.
+    delete_dialog: Option<usize>,
+    /// Open "…" menu: style index and the screen position to show it at.
+    style_popup: Option<(usize, Pos2)>,
+    /// The style editor window is open (it edits the current style, with live preview).
+    edit_open: bool,
     about: crate::about::About,
     theme: egui::ThemePreference,
     #[cfg(target_os = "macos")]
@@ -177,6 +186,10 @@ impl App {
             draft,
             view,
             presets: bw_profiles::photographer_presets(),
+            rename_dialog: None,
+            delete_dialog: None,
+            edit_open: false,
+            style_popup: None,
             preview_edge: 1600,
             preview_generation: 0,
             preview: None,
@@ -208,6 +221,10 @@ impl App {
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
+        if std::env::var_os("BW_DARKROOM_SCREENSHOT_FRESH").is_some() {
+            // Test runs can start from default panel sizes, ignoring saved layout.
+            cc.egui_ctx.memory_mut(|m| *m = egui::Memory::default());
+        }
         cc.egui_ctx.set_theme(app.theme);
         app.open_folder(folder);
         if let Some(image) = start_image {
@@ -404,14 +421,289 @@ impl App {
         self.request_tiles();
     }
 
-    fn delete_current(&mut self) {
-        if self.store.entries[self.current].builtin {
+    fn delete_style(&mut self, index: usize) {
+        match self.store.delete(index) {
+            Ok(removed) => {
+                self.persist_styles();
+                self.status = format!("Deleted style “{}”", removed.style.name);
+                if self.current >= index {
+                    self.select_style(
+                        self.current
+                            .saturating_sub(1)
+                            .min(self.store.entries.len() - 1),
+                    );
+                }
+                self.request_tiles();
+            }
+            Err(e) => self.status = e,
+        }
+    }
+
+    fn handle_style_action(&mut self, action: StyleAction) {
+        match action {
+            StyleAction::Edit(i) => {
+                self.select_style(i);
+                self.edit_open = true;
+            }
+            StyleAction::Duplicate(i) => {
+                let j = self.store.duplicate(i);
+                self.persist_styles();
+                self.select_style(j);
+                self.request_tiles();
+                self.status = format!("Duplicated as “{}”", self.store.entries[j].style.name);
+            }
+            StyleAction::Rename(i) => {
+                self.rename_dialog = Some((i, self.store.entries[i].style.name.clone(), None));
+            }
+            StyleAction::Export(i) => {
+                let style = self.store.entries[i].style.clone();
+                let file = format!("{}.json", crate::export::slug(&style.name));
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name(file)
+                    .add_filter("Style", &["json"])
+                    .save_file()
+                {
+                    let result = serde_json::to_string_pretty(&style)
+                        .map_err(|e| e.to_string())
+                        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()));
+                    self.status = match result {
+                        Ok(()) => format!("Exported “{}” to {}", style.name, path.display()),
+                        Err(e) => format!("Could not export style: {e}"),
+                    };
+                }
+            }
+            StyleAction::MoveUp(i) | StyleAction::MoveDown(i) => {
+                let delta = if matches!(action, StyleAction::MoveUp(_)) {
+                    -1
+                } else {
+                    1
+                };
+                if let Some(j) = self.store.move_by(i, delta) {
+                    // Keep the selection on the same style as it moves.
+                    if self.current == i {
+                        self.current = j;
+                    } else if self.current == j {
+                        self.current = i;
+                    }
+                    self.persist_styles();
+                    self.request_tiles();
+                }
+            }
+            StyleAction::Delete(i) => self.delete_dialog = Some(i),
+        }
+    }
+
+    fn import_styles(&mut self) {
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter("Style", &["json"])
+            .pick_files()
+        else {
+            return;
+        };
+        let mut imported = 0;
+        let mut first = None;
+        for path in paths {
+            match std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| crate::styles::parse_style_file(&t))
+            {
+                Ok(styles) => {
+                    imported += styles.len();
+                    first = first.or(self.store.import(styles));
+                }
+                Err(e) => self.status = format!("{}: {e}", path.display()),
+            }
+        }
+        if let Some(i) = first {
+            self.persist_styles();
+            self.select_style(i);
+            self.request_tiles();
+            self.status = format!(
+                "Imported {imported} style{}",
+                if imported == 1 { "" } else { "s" }
+            );
+        }
+    }
+
+    /// The "…" menu for one style, drawn above everything at the button that opened it.
+    /// Closes when an item is chosen, Escape is pressed or the pointer clicks elsewhere.
+    fn style_popup(&mut self, ctx: &egui::Context) {
+        let Some((index, pos)) = self.style_popup else {
+            return;
+        };
+        if index >= self.store.entries.len() {
+            self.style_popup = None;
             return;
         }
-        self.store.entries.remove(self.current);
-        self.persist_styles();
-        self.select_style(self.current.saturating_sub(1));
-        self.request_tiles();
+        let builtin = self.store.entries[index].builtin;
+        let (up, down) = (
+            self.store.can_move(index, -1),
+            self.store.can_move(index, 1),
+        );
+        let mut action = None;
+        let area = egui::Area::new(egui::Id::unique("style-popup"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .constrain(true)
+            .show(ctx, |ui| {
+                egui::Frame::menu(ui.style()).show(ui, |ui| {
+                    // Look like a menu: frameless, full-width items.
+                    ui.style_mut().visuals.button_frame = false;
+                    ui.set_min_width(160.0);
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                        action = style_menu::items(ui, index, builtin, up, down);
+                    });
+                });
+            });
+        // A press away from the menu (and not on the "…" that opened it) closes it.
+        let clicked_elsewhere = ctx.input(|i| i.pointer.any_pressed())
+            && !area.response.contains_pointer()
+            && ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| p.distance(pos) > 30.0);
+        if action.is_some() || clicked_elsewhere || ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
+            self.style_popup = None;
+        }
+        if let Some(a) = action {
+            self.handle_style_action(a);
+        }
+    }
+
+    /// Rename and delete confirmation dialogs, and the style editor window.
+    fn style_dialogs(&mut self, ctx: &egui::Context) {
+        if let Some((index, mut name, error)) = self.rename_dialog.take() {
+            let mut keep = true;
+            let mut commit = false;
+            egui::Window::new("Rename style")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let field = ui.add(egui::TextEdit::singleline(&mut name).desired_width(320.0));
+                    field.request_focus();
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        commit = true;
+                    }
+                    if let Some(e) = &error {
+                        ui.colored_label(ui.visuals().warn_fg_color, e);
+                    }
+                    ui.horizontal(|ui| {
+                        commit |= ui.button("Rename").clicked();
+                        if ui.button("Cancel").clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        {
+                            keep = false;
+                        }
+                    });
+                });
+            if commit {
+                match self.store.rename(index, &name) {
+                    Ok(()) => {
+                        if self.current == index {
+                            self.draft.name = self.store.entries[index].style.name.clone();
+                        }
+                        self.persist_styles();
+                        keep = false;
+                    }
+                    Err(e) => {
+                        self.rename_dialog = Some((index, name, Some(e)));
+                        return;
+                    }
+                }
+            }
+            if keep {
+                self.rename_dialog = Some((index, name, error));
+            }
+        }
+
+        if let Some(index) = self.delete_dialog {
+            let name = self.store.entries[index].style.name.clone();
+            let mut close = false;
+            egui::Window::new("Delete style?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(format!("Delete “{name}”? This can't be undone."));
+                    ui.horizontal(|ui| {
+                        if ui.button("Delete").clicked() {
+                            self.delete_style(index);
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        {
+                            close = true;
+                        }
+                    });
+                });
+            if close {
+                self.delete_dialog = None;
+            }
+        }
+
+        if self.edit_open {
+            let mut open = true;
+            let builtin = self.store.entries[self.current].builtin;
+            let modified = self.is_modified();
+            let before = self.draft.clone();
+            let mut save = false;
+            let mut save_new = false;
+            let mut revert = false;
+            egui::Window::new(format!(
+                "Edit style · {}",
+                self.store.entries[self.current].style.name
+            ))
+            .id(egui::Id::unique("style-editor"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_pos([ctx.content_rect().center().x - 200.0, 80.0])
+            .show(ctx, |ui| {
+                ui.set_width(400.0);
+                if builtin {
+                    ui.label(
+                        egui::RichText::new("Built-in style: save your changes as a new style.")
+                            .small()
+                            .weak(),
+                    );
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(560.0)
+                    .show(ui, |ui| {
+                        workflow::detailed(ui, &mut self.draft, self.summary.as_ref());
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    save = ui
+                        .add_enabled(!builtin && modified, egui::Button::new("Save changes"))
+                        .on_disabled_hover_text(if builtin {
+                            "Built-in styles are read-only"
+                        } else {
+                            "No changes"
+                        })
+                        .clicked();
+                    save_new = ui.button("Save as new style").clicked();
+                    revert = ui
+                        .add_enabled(modified, egui::Button::new("Revert"))
+                        .clicked();
+                });
+            });
+            if self.draft != before {
+                self.draft_changed();
+            }
+            if save {
+                self.save_changes();
+            }
+            if save_new {
+                self.save_as_new();
+            }
+            if revert {
+                self.select_style(self.current);
+            }
+            self.edit_open = open;
+        }
     }
 
     fn persist_styles(&mut self) {
@@ -758,6 +1050,10 @@ impl App {
         if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
             self.view = workflow::View::from_key(&view.to_string_lossy());
         }
+        // `BW_DARKROOM_SCREENSHOT_EDIT=1` opens the style editor for the shot.
+        if std::env::var_os("BW_DARKROOM_SCREENSHOT_EDIT").is_some() {
+            self.edit_open = true;
+        }
         // `BW_DARKROOM_SCREENSHOT_ABOUT=1` opens the About window for the shot.
         if std::env::var_os("BW_DARKROOM_SCREENSHOT_ABOUT").is_some() {
             self.about.open = true;
@@ -931,27 +1227,105 @@ impl App {
                     });
                 ui.add_space(4.0);
                 let mut pick = None;
+                let menu_action: Option<StyleAction> = None;
+                let mut popup_request = None;
+                let mut import = false;
                 egui::CollapsingHeader::new(egui::RichText::new("Styles").heading())
                     .default_open(true)
                     .show(ui, |ui| {
+                        if ui
+                            .small_button("Import…")
+                            .on_hover_text("Add styles from .json files exported from BW Darkroom")
+                            .clicked()
+                        {
+                            import = true;
+                        }
                         ui.spacing_mut().item_spacing.y = 1.0;
-                        let row = Vec2::new(ui.available_width(), 0.0);
                         for (i, entry) in self.store.entries.iter().enumerate() {
                             let label = if entry.builtin {
                                 entry.style.name.clone()
                             } else {
                                 format!("{}  (mine)", entry.style.name)
                             };
+                            // Full-width row as before, with the "…" menu button laid on
+                            // top of its right end: the row's width never changes, so the
+                            // resizable panel can't be pushed wider.
+                            const ELLIPSIS_W: f32 = 24.0;
+                            let row = Vec2::new(ui.available_width(), 0.0);
                             let button = egui::Button::selectable(i == self.current, label)
                                 .truncate()
+                                .right_text(" ".repeat(4))
                                 .min_size(row);
-                            if ui.add(button).clicked() {
+                            let row_response = ui.add(button);
+                            if row_response.clicked() {
                                 pick = Some(i);
+                            }
+                            let rect = egui::Rect::from_min_max(
+                                egui::pos2(
+                                    row_response.rect.right() - ELLIPSIS_W,
+                                    row_response.rect.top(),
+                                ),
+                                row_response.rect.right_bottom(),
+                            );
+                            // The "…" is a click area over the row's right end that takes no
+                            // layout space (`interact` + painting, no allocation): anything that
+                            // asked for even a pixel more than the row would widen the
+                            // resizable panel, which widens the rows, and so on.
+                            let ellipsis = ui.interact(
+                                rect,
+                                egui::Id::unique(("style-ellipsis", i)),
+                                Sense::click(),
+                            );
+                            let visuals = ui.visuals();
+                            if ellipsis.hovered() {
+                                ui.painter().rect_filled(
+                                    rect.shrink(1.0),
+                                    3.0,
+                                    visuals.widgets.hovered.weak_bg_fill,
+                                );
+                            }
+                            let colour = if ellipsis.hovered() {
+                                visuals.strong_text_color()
+                            } else {
+                                visuals.text_color()
+                            };
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "…",
+                                egui::TextStyle::Button.resolve(ui.style()),
+                                colour,
+                            );
+                            let ellipsis = ellipsis.on_hover_text(
+                                "Edit, duplicate, rename, export or delete this style",
+                            );
+                            // `BW_DARKROOM_SCREENSHOT_STYLEMENU=<index>` opens a menu for screenshots.
+                            let screenshot_menu = self.screenshot.is_some()
+                                && self.style_popup.is_none()
+                                && std::env::var("BW_DARKROOM_SCREENSHOT_STYLEMENU")
+                                    .ok()
+                                    .and_then(|v| v.parse::<usize>().ok())
+                                    == Some(i);
+                            if ellipsis.clicked() || screenshot_menu {
+                                popup_request = Some((i, rect.left_bottom()));
                             }
                         }
                     });
                 if let Some(i) = pick {
                     self.select_style(i);
+                }
+                if let Some(a) = menu_action {
+                    self.handle_style_action(a);
+                }
+                if let Some(request) = popup_request {
+                    // Clicking the same "…" again closes its menu.
+                    self.style_popup = match self.style_popup {
+                        Some((open, _)) if open == request.0 => None,
+                        _ => Some(request),
+                    };
+                }
+                if import {
+                    self.import_styles();
                 }
 
                 ui.add_space(6.0);
@@ -1016,7 +1390,7 @@ impl App {
                         .add_enabled(!builtin, egui::Button::new("Delete"))
                         .clicked()
                     {
-                        self.delete_current();
+                        self.delete_dialog = Some(self.current);
                     }
                 });
             });
@@ -1024,6 +1398,7 @@ impl App {
 
     fn gallery(&mut self, ui: &mut egui::Ui) {
         let mut pick = None;
+        let mut menu_action = None;
         egui::ScrollArea::horizontal()
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -1077,15 +1452,28 @@ impl App {
                                     egui::StrokeKind::Outside,
                                 );
                             }
-                            if response.on_hover_text(&entry.style.name).clicked() {
+                            let response = response.on_hover_text(format!(
+                                "{} (right-click for options)",
+                                entry.style.name
+                            ));
+                            if response.clicked() {
                                 pick = Some(i);
                             }
+                            let (up, down) = (self.store.can_move(i, -1), self.store.can_move(i, 1));
+                            response.context_menu(|ui| {
+                                if let Some(a) = style_menu::items(ui, i, entry.builtin, up, down) {
+                                    menu_action = Some(a);
+                                }
+                            });
                         });
                     }
                 });
             });
         if let Some(i) = pick {
             self.select_style(i);
+        }
+        if let Some(a) = menu_action {
+            self.handle_style_action(a);
         }
     }
 
@@ -1288,6 +1676,8 @@ impl eframe::App for App {
             self.about.open = true;
         }
         self.about.show(ctx);
+        self.style_popup(ctx);
+        self.style_dialogs(ctx);
         self.screenshot_hook(ctx);
 
         if self.detail_enabled && self.loaded.is_some() {
@@ -1330,6 +1720,12 @@ impl eframe::App for App {
                 self.detail_enabled = false;
             }
         }
+    }
+
+    /// Screenshot test runs must not overwrite the user's saved panel sizes and window
+    /// positions (egui's own memory is persisted separately from `save`).
+    fn persist_egui_memory(&self) -> bool {
+        self.screenshot.is_none()
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
