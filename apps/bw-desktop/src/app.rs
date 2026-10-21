@@ -23,6 +23,7 @@ use bw_raw::RawAdjust;
 const KEY_FOLDER: &str = "folder";
 const KEY_VIEW: &str = "workflow_view";
 const KEY_THEME: &str = "theme";
+const KEY_BROWSER_THUMBS: &str = "browser_thumbs";
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
@@ -73,6 +74,8 @@ pub struct App {
     developer_label: String,
     /// Workflow panel shows every control rather than the simple chips.
     view: workflow::View,
+    /// File browser shows thumbnails in its rows (otherwise a compact list).
+    browser_thumbs: bool,
     /// Long edge, in pixels, the preview is rendered at (follows the screen size).
     preview_edge: usize,
 
@@ -185,6 +188,7 @@ impl App {
             developer_label: bw_profiles::developer_label(&draft.developer),
             draft,
             view,
+            browser_thumbs: get(KEY_BROWSER_THUMBS).is_some_and(|v| v == "1"),
             presets: bw_profiles::photographer_presets(),
             rename_dialog: None,
             delete_dialog: None,
@@ -1050,6 +1054,10 @@ impl App {
         if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
             self.view = workflow::View::from_key(&view.to_string_lossy());
         }
+        // `BW_DARKROOM_SCREENSHOT_THUMBS=1|0` sets the file browser's thumbnail rows.
+        if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_THUMBS") {
+            self.browser_thumbs = v == "1";
+        }
         // `BW_DARKROOM_SCREENSHOT_EDIT=1` opens the style editor for the shot.
         if std::env::var_os("BW_DARKROOM_SCREENSHOT_EDIT").is_some() {
             self.edit_open = true;
@@ -1146,57 +1154,119 @@ impl App {
         });
     }
 
+    /// The file browser: a compact list by default (one text row per file, names
+    /// shortened in the middle so the frame number and extension stay visible, the file
+    /// type as a right-hand tag, the thumbnail on hover), or rows with thumbnails.
     fn browser_panel(&mut self, ui: &mut egui::Ui) {
+        let images = self.entries.iter().filter(|e| !e.is_dir).count();
+        let folders = self.entries.len() - images;
+        let mut open: Option<PathBuf> = None;
+        let mut select: Option<PathBuf> = None;
+
         ui.horizontal(|ui| {
             if ui
                 .small_button("Up")
                 .on_hover_text("Parent folder")
                 .clicked()
-                && let Some(parent) = self.folder.parent().map(|p| p.to_path_buf())
             {
-                self.open_folder(parent);
+                open = self.folder.parent().map(|p| p.to_path_buf());
             }
-            ui.add(
-                egui::Label::new(egui::RichText::new(file_name(&self.folder)).strong()).truncate(),
-            )
-            .on_hover_text(self.folder.display().to_string());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.toggle_value(&mut self.browser_thumbs, egui::RichText::new("Thumbs").small())
+                    .on_hover_text("Show thumbnails in the list (taller rows). Off: compact list, thumbnail on hover.");
+                ui.add(egui::Label::new(egui::RichText::new(file_name(&self.folder)).strong()).truncate())
+                    .on_hover_text(self.folder.display().to_string());
+            });
         });
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let mut count = plural(images, "image", "images");
+        if folders > 0 {
+            count.push_str(&format!(" · {}", plural(folders, "folder", "folders")));
+        }
+        ui.label(egui::RichText::new(count).small().weak());
         ui.separator();
 
-        let mut open: Option<PathBuf> = None;
-        let mut select: Option<PathBuf> = None;
+        let thumbs_on = self.browser_thumbs;
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                let row = Vec2::new(ui.available_width(), THUMB_ROW + 4.0);
+                ui.spacing_mut().item_spacing.y = if thumbs_on { 2.0 } else { 0.0 };
+                let row_h = if thumbs_on {
+                    THUMB_ROW + 4.0
+                } else {
+                    ui.spacing().interact_size.y
+                };
+                let width = ui.available_width();
+                let padding = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
+                let button_font = egui::TextStyle::Button.resolve(ui.style());
+                let small_font = egui::TextStyle::Small.resolve(ui.style());
+                let ctx = ui.ctx().clone();
+                let measure = |text: &str, font: &egui::FontId| {
+                    ctx.fonts_mut(|f| {
+                        f.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+                            .size()
+                            .x
+                    })
+                };
                 if self.entries.is_empty() {
                     ui.label(egui::RichText::new("No folders or images here").weak());
                 }
                 for entry in &self.entries {
-                    let button = if entry.is_dir {
-                        egui::Button::selectable(false, format!("▸ {}", entry.name))
-                    } else {
-                        let selected = self.selected.as_ref() == Some(&entry.path);
-                        match self.thumbs.get(&entry.path) {
-                            Some(tex) => {
-                                let thumb = egui::Image::new(tex)
-                                    .fit_to_exact_size(Vec2::splat(THUMB_ROW))
-                                    .maintain_aspect_ratio(true);
-                                egui::Button::selectable(selected, (thumb, entry.name.as_str()))
-                            }
-                            None => egui::Button::selectable(selected, entry.name.as_str()),
-                        }
-                    };
-                    let response = ui
-                        .add(button.truncate().min_size(row))
-                        .on_hover_text(&entry.name);
-                    if response.clicked() {
-                        if entry.is_dir {
+                    if entry.is_dir {
+                        // Folders carry a "Folder" tag, like the file-type tags on images.
+                        let room = width - padding - measure("Folder", &small_font);
+                        let name = browser::middle_ellipsis(&entry.name, room, |t| {
+                            measure(t, &button_font)
+                        });
+                        let response = ui
+                            .add(
+                                egui::Button::selectable(false, name)
+                                    .right_text(egui::RichText::new("Folder").small().weak())
+                                    .truncate()
+                                    .min_size(Vec2::new(width, row_h)),
+                            )
+                            .on_hover_text(format!("Open folder “{}”", entry.name));
+                        if response.clicked() {
                             open = Some(entry.path.clone());
-                        } else {
-                            select = Some(entry.path.clone());
                         }
+                        continue;
+                    }
+                    let selected = self.selected.as_ref() == Some(&entry.path);
+                    let tag = browser::type_tag(&entry.path);
+                    let thumb = self.thumbs.get(&entry.path);
+                    // Thumbnail plus the button's gap before the text, when shown.
+                    let thumb_w = if thumbs_on && thumb.is_some() {
+                        THUMB_ROW + ui.spacing().icon_spacing
+                    } else {
+                        0.0
+                    };
+                    let room = width - padding - thumb_w - measure(&tag, &small_font);
+                    let name =
+                        browser::middle_ellipsis(&entry.name, room, |t| measure(t, &button_font));
+                    let button = match (thumbs_on, thumb) {
+                        (true, Some(tex)) => egui::Button::selectable(
+                            selected,
+                            (
+                                egui::Image::new(tex)
+                                    .fit_to_exact_size(Vec2::splat(THUMB_ROW))
+                                    .maintain_aspect_ratio(true),
+                                name,
+                            ),
+                        ),
+                        _ => egui::Button::selectable(selected, name),
+                    }
+                    .right_text(egui::RichText::new(&tag).small().weak())
+                    .truncate()
+                    .min_size(Vec2::new(width, row_h));
+                    let response = ui.add(button).on_hover_ui(|ui| {
+                        if let Some(tex) = thumb {
+                            ui.add(egui::Image::new(tex).max_size(Vec2::splat(200.0)));
+                        }
+                        ui.label(&entry.name);
+                    });
+                    if response.clicked() {
+                        select = Some(entry.path.clone());
                     }
                 }
             });
@@ -1639,11 +1709,13 @@ impl eframe::App for App {
         let mut show_browser = self.show_browser;
         let panel_frame =
             egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 8));
-        egui::Panel::left("browser")
+        // New id: the compact list starts at its narrower default instead of a width
+        // saved for the old thumbnail list.
+        egui::Panel::left("files")
             .frame(panel_frame)
             .resizable(true)
-            .default_size(210.0)
-            .size_range(140.0..=420.0)
+            .default_size(170.0)
+            .size_range(120.0..=360.0)
             .show_collapsible(ui, &mut show_browser, |ui| self.browser_panel(ui));
         self.show_browser = show_browser;
         let mut show_styles = self.show_styles;
@@ -1741,6 +1813,10 @@ impl eframe::App for App {
             egui::ThemePreference::System => "system",
         };
         storage.set_string(KEY_THEME, theme.into());
+        storage.set_string(
+            KEY_BROWSER_THUMBS,
+            if self.browser_thumbs { "1" } else { "0" }.into(),
+        );
         let flag = |b: bool| if b { '1' } else { '0' };
         storage.set_string(
             KEY_PANELS,

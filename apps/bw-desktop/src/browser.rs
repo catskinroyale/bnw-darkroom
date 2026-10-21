@@ -39,6 +39,49 @@ pub fn list_folder(folder: &Path) -> Vec<Entry> {
     entries
 }
 
+/// Shorten `text` to fit `max_width` by replacing its middle with "…", keeping the start
+/// and the end (frame number, extension) visible: the long-standing Mac convention for
+/// file names. `measure` returns the drawn width of a string.
+pub fn middle_ellipsis(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
+    if measure(text) <= max_width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let candidate = |keep: usize| {
+        let tail = keep / 2;
+        let head = keep - tail;
+        let mut s: String = chars[..head].iter().collect();
+        s.push('…');
+        s.extend(&chars[chars.len() - tail..]);
+        s
+    };
+    // Largest number of kept characters that still fits.
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if measure(&candidate(mid)) <= max_width {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    candidate(lo)
+}
+
+/// Short upper-case file type for the list's right-hand tag ("NEF", "JPG", "TIF").
+pub fn type_tag(path: &Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    match ext.as_str() {
+        "JPEG" => "JPG".into(),
+        "TIFF" => "TIF".into(),
+        _ => ext,
+    }
+}
+
 /// Thumbnails to decode; a newer request replaces any unfinished one.
 pub struct ThumbRequest {
     pub paths: Vec<PathBuf>,
@@ -84,4 +127,30 @@ pub fn spawn_thumbnailer(rx: Receiver<ThumbRequest>, tx: Sender<Msg>, ctx: egui:
             }
         })
         .expect("spawn thumbnail thread");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fixed-width "font": every character is 1 unit wide.
+    fn width(s: &str) -> f32 {
+        s.chars().count() as f32
+    }
+
+    #[test]
+    fn middle_ellipsis_keeps_start_and_end() {
+        assert_eq!(middle_ellipsis("DSC_0040.NEF", 20.0, width), "DSC_0040.NEF");
+        let short = middle_ellipsis("Holiday in Iceland 2024 - frame 0137.NEF", 15.0, width);
+        assert_eq!(width(&short), 15.0);
+        assert!(short.starts_with("Holiday") && short.ends_with(".NEF") && short.contains('…'));
+        assert_eq!(middle_ellipsis("abcdef", 1.0, width), "…");
+    }
+
+    #[test]
+    fn type_tags_are_short() {
+        assert_eq!(type_tag(Path::new("a.nef")), "NEF");
+        assert_eq!(type_tag(Path::new("a.jpeg")), "JPG");
+        assert_eq!(type_tag(Path::new("a.TIFF")), "TIF");
+    }
 }

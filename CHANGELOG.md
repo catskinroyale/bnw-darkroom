@@ -5,6 +5,25 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Compact file browser.** The left panel is now a one-line-per-file list (default
+  width 170 px, down from about 260 px) instead of a list of thumbnails:
+  - Long names are shortened in the middle so the start and the end, including the
+    number, stay visible (for example "Reykjav…042.NEF"), as the Mac Finder and Apple's
+    interface guidelines recommend. Hover a row to see the full name.
+  - Each row has a short type tag on the right (NEF, DNG, JPG, PNG, TIF), and folders
+    have a "Folder" tag.
+  - Hovering a file shows a larger thumbnail beside the list.
+  - A **Thumbs** toggle in the panel header brings back small inline thumbnails. The
+    setting is remembered.
+  - The header shows the folder name (full path on hover) and the number of images and
+    folders.
+
+### Fixed
+- In Detailed view, showing the white-balance sliders no longer switches an image from
+  "As shot" to Custom or marks its adjustments as edited. It changes only when you move
+  a slider.
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

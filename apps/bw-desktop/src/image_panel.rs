@@ -126,7 +126,8 @@ pub fn show(
             }
         });
         if detailed || matches!(adjust.white_balance, WhiteBalance::Custom { .. }) {
-            let (mut temp, mut tint) = photo.temp_tint_for(adjust.white_balance);
+            let (shown_temp, shown_tint) = photo.temp_tint_for(adjust.white_balance);
+            let (mut temp, mut tint) = (shown_temp, shown_tint);
             let t = ui
                 .add(
                     egui::Slider::new(&mut temp, 2000.0..=12000.0)
@@ -143,7 +144,10 @@ pub fn show(
                         .text("Tint"),
                 )
                 .on_hover_text(help::TINT);
-            if t.changed() || n.changed() {
+            // Only a real move counts: the logarithmic slider can nudge the value by a
+            // fraction just by being drawn, which must not turn "As shot" into Custom.
+            let moved = (temp - shown_temp).abs() > 0.5 || (tint - shown_tint).abs() > 0.5;
+            if (t.changed() || n.changed()) && moved {
                 adjust.white_balance = WhiteBalance::Custom {
                     temp: temp.round(),
                     tint: tint.round(),
