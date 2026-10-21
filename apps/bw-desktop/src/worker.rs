@@ -25,8 +25,21 @@ use crate::source::Source;
 
 /// Long edge of style-gallery tiles.
 pub const TILE_EDGE: usize = 360;
-/// Side of the 1:1 detail crop.
-pub const DETAIL_SIZE: usize = 512;
+/// Pixel rectangle `(x, y, width, height)` of a detail crop of `size` pixels centred on
+/// `centre` (0–1 across the image), moved inwards where it would cross an edge.
+pub fn detail_rect(
+    w: usize,
+    h: usize,
+    centre: [f32; 2],
+    size: usize,
+) -> (usize, usize, usize, usize) {
+    let (cw, ch) = (size.min(w), size.min(h));
+    let cx = (centre[0].clamp(0.0, 1.0) * w as f32).round() as usize;
+    let cy = (centre[1].clamp(0.0, 1.0) * h as f32).round() as usize;
+    let x = cx.saturating_sub(cw / 2).min(w - cw);
+    let y = cy.saturating_sub(ch / 2).min(h - ch);
+    (x, y, cw, ch)
+}
 
 pub enum Job {
     Load {
@@ -45,6 +58,8 @@ pub enum Job {
         style: Style,
         adjust: RawAdjust,
         centre: [f32; 2],
+        /// Side of the crop in image pixels (smaller = more magnified on screen).
+        crop_px: usize,
     },
     Tiles {
         generation: u64,
@@ -72,6 +87,8 @@ pub enum Msg {
     Detail {
         generation: u64,
         image: egui::ColorImage,
+        /// The crop's area as fractions of the image: `[x0, y0, x1, y1]`.
+        area: [f32; 4],
     },
     Tile {
         generation: u64,
@@ -161,7 +178,7 @@ impl Current {
 struct Pending {
     load: Option<(u64, PathBuf)>,
     preview: Option<(u64, Style, RawAdjust, usize)>,
-    detail: Option<(u64, Style, RawAdjust, [f32; 2])>,
+    detail: Option<(u64, Style, RawAdjust, [f32; 2], usize)>,
     tiles: VecDeque<(u64, usize, Style, RawAdjust)>,
 }
 
@@ -191,7 +208,8 @@ impl Pending {
                 style,
                 adjust,
                 centre,
-            } => self.detail = Some((generation, style, adjust, centre)),
+                crop_px,
+            } => self.detail = Some((generation, style, adjust, centre, crop_px)),
             Job::Tiles {
                 generation,
                 styles,
@@ -269,21 +287,22 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                         },
                         Err(error) => Msg::RenderFailed { error },
                     }
-                } else if let Some((generation, style, adjust, centre)) = pending.detail.take() {
+                } else if let Some((generation, style, adjust, centre, crop_px)) =
+                    pending.detail.take()
+                {
                     let Some(cur) = current.as_mut() else {
                         continue;
                     };
                     let full = cur.full(&adjust);
                     let (w, h) = full.dimensions();
-                    let cx = (centre[0] * w as f32) as usize;
-                    let cy = (centre[1] * h as f32) as usize;
-                    let x = cx
-                        .saturating_sub(DETAIL_SIZE / 2)
-                        .min(w.saturating_sub(DETAIL_SIZE));
-                    let y = cy
-                        .saturating_sub(DETAIL_SIZE / 2)
-                        .min(h.saturating_sub(DETAIL_SIZE));
-                    let crop = bw_io::crop(full, x, y, DETAIL_SIZE, DETAIL_SIZE);
+                    let (x, y, cw, ch) = detail_rect(w, h, centre, crop_px);
+                    let crop = bw_io::crop(full, x, y, cw, ch);
+                    let area = [
+                        x as f32 / w as f32,
+                        y as f32 / h as f32,
+                        (x + cw) as f32 / w as f32,
+                        (y + ch) as f32 / h as f32,
+                    ];
                     // The crop spans its share of the frame, so grain and edge effects
                     // are rendered at the full-resolution scale.
                     let crop_mm = style.frame_width_mm() * crop.dimensions().0 as f64 / w as f64;
@@ -291,6 +310,7 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                         Ok(r) => Msg::Detail {
                             generation,
                             image: gray_image(&r.print),
+                            area,
                         },
                         Err(e) => Msg::RenderFailed {
                             error: e.to_string(),
@@ -455,6 +475,28 @@ mod tests {
             Msg::ExportFailed { error } => panic!("{error}"),
             _ => panic!("unexpected message"),
         }
+    }
+
+    #[test]
+    fn detail_rect_is_centred_and_kept_inside() {
+        // Centred where there is room.
+        assert_eq!(
+            detail_rect(6000, 4000, [0.5, 0.5], 512),
+            (2744, 1744, 512, 512)
+        );
+        let (x, y, w, h) = detail_rect(6000, 4000, [0.3, 0.7], 1024);
+        assert_eq!((x + w / 2, y + h / 2), (1800, 2800));
+        // Moved inwards at the edges, never outside the image.
+        assert_eq!(
+            detail_rect(6000, 4000, [0.0, 1.0], 512),
+            (0, 3488, 512, 512)
+        );
+        assert_eq!(
+            detail_rect(6000, 4000, [1.0, 0.0], 512),
+            (5488, 0, 512, 512)
+        );
+        // Images smaller than the crop give the whole image.
+        assert_eq!(detail_rect(300, 200, [0.9, 0.9], 512), (0, 0, 300, 200));
     }
 
     #[test]

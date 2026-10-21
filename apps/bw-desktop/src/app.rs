@@ -27,6 +27,8 @@ const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
 /// Thumbnail size in browser rows.
 const THUMB_ROW: f32 = 28.0;
+/// Side of the detail window's image area, in points.
+const DETAIL_VIEW_PT: f32 = 512.0;
 
 /// One style-gallery tile.
 #[derive(Clone)]
@@ -84,6 +86,12 @@ pub struct App {
 
     detail_enabled: bool,
     detail_centre: [f32; 2],
+    /// Detail magnification: 1 = 100 % (one image pixel per screen pixel), 2 = 200 %.
+    detail_zoom: u8,
+    /// Area of the image the detail window shows, as fractions `[x0, y0, x1, y1]`.
+    detail_area: Option<[f32; 4]>,
+    /// Screen pixels per point (2 on Retina displays), updated every frame.
+    pixels_per_point: f32,
     detail_generation: u64,
     detail: Option<TextureHandle>,
 
@@ -179,6 +187,9 @@ impl App {
             show_gallery: panels[2],
             detail_enabled: false,
             detail_centre: [0.5, 0.5],
+            detail_zoom: 1,
+            detail_area: None,
+            pixels_per_point: cc.egui_ctx.pixels_per_point(),
             detail_generation: 0,
             detail: None,
             tiles_generation: 0,
@@ -316,6 +327,9 @@ impl App {
             style: self.draft.clone(),
             adjust: self.adjust,
             centre: self.detail_centre,
+            // Enough image pixels to fill the view at this zoom on this screen.
+            crop_px: (DETAIL_VIEW_PT * self.pixels_per_point / f32::from(self.detail_zoom)).round()
+                as usize,
         });
     }
 
@@ -648,8 +662,20 @@ impl App {
                     set_texture(ctx, &mut self.preview, "preview", image);
                     self.preview_ms = Some(millis);
                 }
-                Msg::Detail { generation, image } if generation == self.detail_generation => {
-                    set_texture(ctx, &mut self.detail, "detail", image);
+                Msg::Detail {
+                    generation,
+                    image,
+                    area,
+                } if generation == self.detail_generation => {
+                    // Nearest-neighbour: at 200 % each image pixel shows as a crisp block.
+                    match &mut self.detail {
+                        Some(tex) => tex.set(image, TextureOptions::NEAREST),
+                        None => {
+                            self.detail =
+                                Some(ctx.load_texture("detail", image, TextureOptions::NEAREST));
+                        }
+                    }
+                    self.detail_area = Some(area);
                 }
                 Msg::Tile {
                     generation,
@@ -693,6 +719,26 @@ impl App {
     }
 
     fn screenshot_hook(&mut self, ctx: &egui::Context) {
+        if self.screenshot.is_none() {
+            return;
+        }
+        // `BW_DARKROOM_SCREENSHOT_DETAIL=x,y,zoom` opens the detail view at that point.
+        let detail_spec = std::env::var("BW_DARKROOM_SCREENSHOT_DETAIL").ok();
+        if let Some(spec) = &detail_spec
+            && self.loaded.is_some()
+            && !self.detail_enabled
+        {
+            let v: Vec<f32> = spec
+                .split(',')
+                .filter_map(|p| p.trim().parse().ok())
+                .collect();
+            if let [x, y, zoom] = v[..] {
+                self.detail_enabled = true;
+                self.detail_centre = [x, y];
+                self.detail_zoom = zoom as u8;
+                self.request_detail();
+            }
+        }
         let Some((path, started, requested)) = &mut self.screenshot else {
             return;
         };
@@ -721,7 +767,8 @@ impl App {
             self.export_open = true;
         }
         let rendered = (self.preview.is_some() || self.summary.is_none())
-            && !self.tiles.iter().any(|t| matches!(t, Tile::Pending));
+            && !self.tiles.iter().any(|t| matches!(t, Tile::Pending))
+            && (detail_spec.is_none() || self.detail_area.is_some());
         if !*requested && (rendered || started.elapsed().as_secs() > 30) {
             *requested = true;
             let path = path.clone();
@@ -1102,35 +1149,46 @@ impl App {
         }
         let tex_size = texture.size_vec2();
         let scale = (available.x / tex_size.x).min(available.y / tex_size.y);
-        let size = tex_size * scale;
-        let response = ui
-            .centered_and_justified(|ui| {
-                ui.add(
-                    egui::Image::new(&texture)
-                        .fit_to_exact_size(size)
-                        .sense(Sense::click()),
-                )
-            })
-            .inner;
+        // Lay the image out explicitly: clicks and the detail outline are measured against
+        // the rectangle the image is actually drawn in, not the whole panel.
+        let (area_rect, response) = ui.allocate_exact_size(available, Sense::click());
+        let image_rect = egui::Rect::from_center_size(area_rect.center(), tex_size * scale);
+        egui::Image::new(&texture).paint_at(ui, image_rect);
         if self.detail_enabled
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
+            && image_rect.contains(pos)
         {
-            let rect = response.rect;
             self.detail_centre = [
-                ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0),
-                ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0),
+                ((pos.x - image_rect.min.x) / image_rect.width()).clamp(0.0, 1.0),
+                ((pos.y - image_rect.min.y) / image_rect.height()).clamp(0.0, 1.0),
             ];
             self.request_detail();
         }
-        if self.detail_enabled {
-            let rect = response.rect;
-            let c = Pos2::new(
-                rect.min.x + self.detail_centre[0] * rect.width(),
-                rect.min.y + self.detail_centre[1] * rect.height(),
+        if self.detail_enabled
+            && let Some([x0, y0, x1, y1]) = self.detail_area
+        {
+            // Outline of exactly what the detail window shows (moved inwards at edges).
+            let at = |fx: f32, fy: f32| {
+                Pos2::new(
+                    image_rect.min.x + fx * image_rect.width(),
+                    image_rect.min.y + fy * image_rect.height(),
+                )
+            };
+            let outline = egui::Rect::from_min_max(at(x0, y0), at(x1, y1));
+            let painter = ui.painter_at(image_rect);
+            painter.rect_stroke(
+                outline,
+                0.0,
+                Stroke::new(2.5, Color32::from_black_alpha(140)),
+                egui::StrokeKind::Outside,
             );
-            ui.painter()
-                .circle_stroke(c, 6.0, Stroke::new(1.5, Color32::from_rgb(230, 120, 60)));
+            painter.rect_stroke(
+                outline,
+                0.0,
+                Stroke::new(1.5, Color32::from_rgb(230, 120, 60)),
+                egui::StrokeKind::Outside,
+            );
         }
     }
 }
@@ -1138,6 +1196,13 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
+        if (ctx.pixels_per_point() - self.pixels_per_point).abs() > 0.01 {
+            // Moved to a display with a different pixel density: keep 100 % exact.
+            self.pixels_per_point = ctx.pixels_per_point();
+            if self.detail_enabled {
+                self.request_detail();
+            }
+        }
         self.handle_messages(ctx);
 
         if !ctx.egui_wants_keyboard_input() {
@@ -1227,18 +1292,40 @@ impl eframe::App for App {
 
         if self.detail_enabled && self.loaded.is_some() {
             let mut open = true;
-            egui::Window::new("Detail 1:1")
+            let mut zoom = self.detail_zoom;
+            let ppp = self.pixels_per_point;
+            egui::Window::new("Detail")
                 .open(&mut open)
                 .resizable(false)
-                .default_pos([ctx.content_rect().right() - 900.0, 120.0])
-                .show(ctx, |ui| match &self.detail {
-                    Some(tex) => {
-                        ui.add(egui::Image::new(tex).fit_to_exact_size(tex.size_vec2()));
-                    }
-                    None => {
-                        ui.spinner();
+                // Open over the right-hand panel so the outlined area on the image stays visible.
+                .default_pos([ctx.content_rect().right() - DETAIL_VIEW_PT - 40.0, 60.0])
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        for (z, label, help) in [
+                            (1u8, "100%", "One image pixel per screen pixel: the export at full size"),
+                            (2u8, "200%", "Magnified two times: each image pixel is a 2 × 2 block, for judging grain"),
+                        ] {
+                            ui.selectable_value(&mut zoom, z, label).on_hover_text(help);
+                        }
+                        ui.label(
+                            egui::RichText::new("Click the image to move the outlined area").small().weak(),
+                        );
+                    });
+                    match &self.detail {
+                        Some(tex) => {
+                            // Texture pixels → points so the zoom is exact on any display.
+                            let size = tex.size_vec2() * f32::from(self.detail_zoom) / ppp;
+                            ui.add(egui::Image::new(tex).fit_to_exact_size(size));
+                        }
+                        None => {
+                            ui.allocate_ui(egui::vec2(DETAIL_VIEW_PT, DETAIL_VIEW_PT), |ui| ui.spinner());
+                        }
                     }
                 });
+            if zoom != self.detail_zoom {
+                self.detail_zoom = zoom;
+                self.request_detail();
+            }
             if !open {
                 self.detail_enabled = false;
             }

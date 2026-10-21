@@ -5,6 +5,19 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Detail view zoom: **100%** (one image pixel per screen pixel, exact on Retina displays)
+  and **200%** (each image pixel as a crisp 2×2 block for judging grain).
+- The main image shows an outline of exactly the area the detail view displays.
+
+### Fixed
+- The detail view was not consistently centred on the clicked point: clicks were measured
+  against the whole preview panel rather than the drawn image, so the error varied with the
+  image's aspect ratio and the panel size. Clicks outside the image are now ignored.
+
+### Changed
+- The detail window opens beside the image instead of over it.
+
 ## [0.3.0] - 2026-10-21
 
 ### Added
