@@ -4,7 +4,7 @@ members = ["crates/*", "apps/*"]
 
 [workspace.package]
 edition = "2024"
-version = "0.3.1"
+version = "0.4.0"
 # Default for every crate: Apache-2.0 (engine crates, apps, plugins). bw-core is MIT and
 # sets its own licence. See README "Licensing".
 license = "Apache-2.0"

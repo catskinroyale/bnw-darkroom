@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-21
+
 ### Added
 - **Style menu (…)** on every row of the Styles list, and on right-click of a gallery
   tile: **Edit…** (an editor window with every setting and a live preview), **Duplicate**,
@@ -125,7 +127,8 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/catskinroyale/bnw-darkroom/compare/49d00c7...v0.2.0
