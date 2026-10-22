@@ -5,6 +5,28 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Grain controls** in the Simple and Detailed views and the style editor:
+  - **Size** changes how coarse the grain clumps are, with strength kept the same.
+  - **Amount** changes the grain's strength (0 removes it).
+  - **Roughness** goes from softer and smoother (below 0) to grittier, with more
+    isolated dark and bright specks (above 0).
+  - **Randomise** picks a new pattern and random settings within a usable range;
+    **Film's grain** resets; **New pattern** is unchanged.
+  - The defaults are the film's own grain, and the grain readout says when it has been
+    adjusted. Styles saved without adjustments are unchanged.
+
+### Changed
+- **The Detail window keeps up while you adjust.** Its crop now renders before the full
+  preview, so any workflow or image change shows there first. A spinner shows while an
+  update is on its way. The window now opens over the left of the image, leaving the
+  Styles and Workflow panels free.
+
+### Fixed
+- Switching the Detail window to 200% no longer doubles its width and leaves the
+  magnified crop on the left. The window also returns to its normal size if an earlier
+  version saved it oversized.
+
 ## [0.5.0] - 2026-10-21
 
 ### Added

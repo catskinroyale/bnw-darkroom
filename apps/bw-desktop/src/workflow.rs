@@ -3,7 +3,7 @@
 //! one- or two-line hover explanation of what it does and how it changes the image.
 
 use bw_negative::times::TimeOrigin;
-use bw_profiles::{AgitationSpec, ModelSummary, Style};
+use bw_profiles::{AgitationSpec, GrainSpec, ModelSummary, Style};
 use eframe::egui::{self, Color32, Pos2, Sense, Stroke, Vec2};
 
 mod help {
@@ -16,6 +16,13 @@ mod help {
     pub const CROP: &str = "Use only the centre of the frame. Cropping means enlarging the negative more, so grain grows.";
     pub const GRAIN_SEED: &str = "Picks the random grain pattern. The same number gives identical grain; the amount does not change.";
     pub const NEW_PATTERN: &str = "Same grain amount and character, a different random pattern.";
+    pub const GRAIN_SIZE: &str = "Coarseness of the grain clumps, relative to the film's own. Strength stays the same.\n×1 is the film's grain.";
+    pub const GRAIN_AMOUNT: &str =
+        "Strength of the grain, relative to the film's own. ×1 is the film's grain; 0 removes it.";
+    pub const GRAIN_ROUGHNESS: &str = "Character of the grain: below 0 softer and smoother; above 0 grittier, with more\nisolated dark and bright specks. 0 is the film's grain.";
+    pub const FILM_GRAIN: &str = "Back to the film's own grain: size ×1, amount ×1, roughness 0.";
+    pub const RANDOMISE: &str =
+        "A new random pattern with random size, amount and roughness, within a usable range.";
     pub const GRAIN_READOUT: &str = "Diffuse RMS granularity at this enlargement (Kodak's measure).\nAround 10 looks smooth; above 25 looks gritty.";
     pub const NAME: &str = "Name of this style, used in the style list and in exported file names.";
     pub const EI: &str = "Exposure index the film is developed for: picks the published time. The film is still exposed\nat box speed, because your photo is already exposed; use Exposure comp. to under- or over-expose it.";
@@ -463,14 +470,68 @@ fn grain_section(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary
             }
         }
     });
-    ui.horizontal(|ui| {
-        if let Some(m) = summary {
-            ui.label(format!(
-                "Grain at print: {} ({:.0})",
-                m.grain.describe(),
-                m.grain.at_print
-            ))
-            .on_hover_text(help::GRAIN_READOUT);
+    grain_controls(ui, s);
+    if let Some(m) = summary {
+        grain_readout(ui, s, m);
+    }
+    ui.label(
+        egui::RichText::new("Press D and click the image to judge grain at 1:1.")
+            .small()
+            .weak(),
+    );
+}
+
+/// Grain size, amount and roughness sliders, with reset, randomise and new pattern.
+fn grain_controls(ui: &mut egui::Ui, s: &mut Style) {
+    egui::Grid::new("grain-controls")
+        .num_columns(2)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label("Size").on_hover_text(help::GRAIN_SIZE);
+            ui.add(
+                egui::Slider::new(&mut s.grain.size, 0.5..=3.0)
+                    .logarithmic(true)
+                    .fixed_decimals(2)
+                    .prefix("×"),
+            )
+            .on_hover_text(help::GRAIN_SIZE);
+            ui.end_row();
+            ui.label("Amount").on_hover_text(help::GRAIN_AMOUNT);
+            ui.add(
+                egui::Slider::new(&mut s.grain.amount, 0.0..=3.0)
+                    .fixed_decimals(2)
+                    .prefix("×"),
+            )
+            .on_hover_text(help::GRAIN_AMOUNT);
+            ui.end_row();
+            ui.label("Roughness").on_hover_text(help::GRAIN_ROUGHNESS);
+            let mut rough = (s.grain.roughness * 100.0).round() as i32;
+            if ui
+                .add(egui::Slider::new(&mut rough, -100..=100))
+                .on_hover_text(help::GRAIN_ROUGHNESS)
+                .changed()
+            {
+                s.grain.roughness = f64::from(rough) / 100.0;
+            }
+            ui.end_row();
+        });
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(
+                !s.grain.is_film_grain(),
+                egui::Button::new("Film's grain").small(),
+            )
+            .on_hover_text(help::FILM_GRAIN)
+            .clicked()
+        {
+            s.grain = GrainSpec::default();
+        }
+        if ui
+            .small_button("Randomise")
+            .on_hover_text(help::RANDOMISE)
+            .clicked()
+        {
+            randomise_grain(s);
         }
         if ui
             .small_button("New pattern")
@@ -480,11 +541,44 @@ fn grain_section(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary
             s.seed = s.seed.wrapping_add(1);
         }
     });
-    ui.label(
-        egui::RichText::new("Press D and click the image to judge grain at 1:1.")
-            .small()
-            .weak(),
-    );
+}
+
+fn grain_readout(ui: &mut egui::Ui, s: &Style, m: &ModelSummary) {
+    let adjusted = if s.grain.is_film_grain() {
+        ""
+    } else {
+        " · adjusted from the film"
+    };
+    ui.label(format!(
+        "Grain at print: {} ({:.0}){adjusted}",
+        m.grain.describe(),
+        m.grain.at_print
+    ))
+    .on_hover_text(help::GRAIN_READOUT);
+}
+
+/// Random grain within a usable range, and a new pattern.
+fn randomise_grain(s: &mut Style) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut state = nanos ^ s.seed.rotate_left(17);
+    // SplitMix64: plenty for picking slider values.
+    let mut next = || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let mut unit = || (next() >> 11) as f64 / (1u64 << 53) as f64;
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    s.grain = GrainSpec {
+        size: round2(0.7 * (2.2f64 / 0.7).powf(unit())),
+        amount: round2(0.6 + 1.4 * unit()),
+        roughness: round2(-0.6 + 1.4 * unit()),
+    };
+    s.seed = next() % 100_000;
 }
 
 /// Simple view: choices as toggle chips, no printing controls.
@@ -629,14 +723,11 @@ pub fn detailed(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>
         ui.end_row();
     });
 
+    ui.add_space(4.0);
+    section(ui, "Grain", help::GRAIN);
+    grain_controls(ui, s);
     if let Some(m) = summary {
-        ui.add_space(4.0);
-        ui.label(format!(
-            "Grain at print: {} ({:.0})",
-            m.grain.describe(),
-            m.grain.at_print
-        ))
-        .on_hover_text(help::GRAIN_READOUT);
+        grain_readout(ui, s, m);
     }
     ui.add_space(6.0);
     model_panel(ui, summary);

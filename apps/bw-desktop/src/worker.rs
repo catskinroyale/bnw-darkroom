@@ -271,22 +271,8 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                             Msg::LoadFailed { generation, error }
                         }
                     }
-                } else if let Some((generation, style, adjust, edge)) = pending.preview.take() {
-                    let Some(cur) = current.as_mut() else {
-                        continue;
-                    };
-                    let start = Instant::now();
-                    let (scene, fresh) = cur.preview(edge, &adjust);
-                    let original = fresh.then(|| colour_image(scene));
-                    match render_whole(scene, &style) {
-                        Ok(r) => Msg::Preview {
-                            generation,
-                            image: gray_image(&r.print),
-                            original,
-                            millis: start.elapsed().as_millis(),
-                        },
-                        Err(error) => Msg::RenderFailed { error },
-                    }
+                // The detail goes before the preview: it is a small crop, and while it is
+                // open it is what the user is fine-tuning against.
                 } else if let Some((generation, style, adjust, centre, crop_px)) =
                     pending.detail.take()
                 {
@@ -315,6 +301,22 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                         Err(e) => Msg::RenderFailed {
                             error: e.to_string(),
                         },
+                    }
+                } else if let Some((generation, style, adjust, edge)) = pending.preview.take() {
+                    let Some(cur) = current.as_mut() else {
+                        continue;
+                    };
+                    let start = Instant::now();
+                    let (scene, fresh) = cur.preview(edge, &adjust);
+                    let original = fresh.then(|| colour_image(scene));
+                    match render_whole(scene, &style) {
+                        Ok(r) => Msg::Preview {
+                            generation,
+                            image: gray_image(&r.print),
+                            original,
+                            millis: start.elapsed().as_millis(),
+                        },
+                        Err(error) => Msg::RenderFailed { error },
                     }
                 } else if let Some((generation, index, style, adjust)) = pending.tiles.pop_front() {
                     let Some(cur) = current.as_mut() else {

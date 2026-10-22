@@ -198,7 +198,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ev_compensation: 0.0,
                     flare_fraction: 0.0,
                 };
-                let options = RenderOptions { seed, geometry };
+                let options = RenderOptions {
+                    seed,
+                    geometry,
+                    grain: Default::default(),
+                };
                 let start = std::time::Instant::now();
                 let negative = develop(
                     &scene,

@@ -53,6 +53,41 @@ impl AgitationSpec {
     }
 }
 
+/// Creative grain adjustments on top of the film's own grain (see
+/// [`bw_negative::GrainAdjust`]). The default is the film's grain, unadjusted.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GrainSpec {
+    pub amount: f64,
+    pub size: f64,
+    pub roughness: f64,
+}
+
+impl Default for GrainSpec {
+    fn default() -> Self {
+        let a = bw_negative::GrainAdjust::default();
+        Self {
+            amount: a.amount,
+            size: a.size,
+            roughness: a.roughness,
+        }
+    }
+}
+
+impl GrainSpec {
+    pub fn adjust(&self) -> bw_negative::GrainAdjust {
+        bw_negative::GrainAdjust {
+            amount: self.amount,
+            size: self.size,
+            roughness: self.roughness,
+        }
+    }
+
+    pub fn is_film_grain(&self) -> bool {
+        self.adjust().is_film_grain()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DevelopmentSpec {
     /// Development time in minutes; `None` uses the combination's normal time.
@@ -89,6 +124,9 @@ pub struct Style {
     /// half enlarged. Larger values enlarge the negative more, so grain shows more.
     #[serde(default = "default_crop")]
     pub crop: f64,
+    /// Grain size, amount and roughness relative to the film's own grain.
+    #[serde(default, skip_serializing_if = "GrainSpec::is_film_grain")]
+    pub grain: GrainSpec,
 }
 
 fn default_seed() -> u64 {
@@ -224,7 +262,10 @@ impl Style {
         let process = self.processing();
         let state = calibration.resolve(&process);
         let area = film.grain.area_um2 * state.grain_area_factor;
-        let granularity = 1000.0 * (0.434 * area / bw_film::GrainParams::APERTURE_48_UM2).sqrt();
+        // Amount scales the RMS amplitude; size and roughness hold per-pixel strength.
+        let granularity = 1000.0
+            * (0.434 * area / bw_film::GrainParams::APERTURE_48_UM2).sqrt()
+            * self.grain.amount.max(0.0);
         Ok(ModelSummary {
             grain: GrainReadout {
                 granularity,
@@ -299,6 +340,7 @@ pub fn render(
     let options = RenderOptions {
         seed: style.seed,
         geometry,
+        grain: style.grain.adjust(),
     };
     let negative = develop(
         scene,
@@ -468,6 +510,7 @@ pub fn photographer_presets() -> Vec<Preset> {
             seed: 1,
             format_mm,
             crop,
+            grain: GrainSpec::default(),
         };
         s.set_push_stops(push);
         s
@@ -603,6 +646,7 @@ pub fn builtin_styles() -> Vec<Style> {
             seed: 1,
             format_mm: 36.0,
             crop: 1.0,
+            grain: GrainSpec::default(),
         };
         style.set_push_stops(push);
         style

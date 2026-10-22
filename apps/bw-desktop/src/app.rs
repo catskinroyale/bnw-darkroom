@@ -101,6 +101,13 @@ pub struct App {
     /// Screen pixels per point (2 on Retina displays), updated every frame.
     pixels_per_point: f32,
     detail_generation: u64,
+    /// Zoom of the latest detail request, and of the detail texture once it arrives:
+    /// the texture is drawn at the zoom it was rendered for, never the newly chosen one.
+    detail_requested_zoom: u8,
+    detail_texture_zoom: u8,
+    /// Generation of the detail texture on screen; behind `detail_generation` while a
+    /// newer render is on its way.
+    detail_shown_generation: u64,
     detail: Option<TextureHandle>,
 
     tiles_generation: u64,
@@ -129,6 +136,8 @@ pub struct App {
     /// Test hook: `BW_DARKROOM_SCREENSHOT=<png>` saves one screenshot of the window once
     /// the image, preview and gallery have rendered, then quits.
     screenshot: Option<(PathBuf, std::time::Instant, bool)>,
+    /// Screenshot runs: whether `BW_DARKROOM_SCREENSHOT_THEN_PUSH` has been applied.
+    screenshot_then_applied: bool,
 }
 
 impl App {
@@ -216,6 +225,9 @@ impl App {
             detail_area: None,
             pixels_per_point: cc.egui_ctx.pixels_per_point(),
             detail_generation: 0,
+            detail_requested_zoom: 1,
+            detail_texture_zoom: 1,
+            detail_shown_generation: 0,
             detail: None,
             tiles_generation: 0,
             export,
@@ -230,6 +242,7 @@ impl App {
             },
             #[cfg(target_os = "macos")]
             menu: crate::menu::AppMenu::install(&cc.egui_ctx),
+            screenshot_then_applied: false,
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
@@ -351,6 +364,7 @@ impl App {
             return;
         }
         self.detail_generation += 1;
+        self.detail_requested_zoom = self.detail_zoom;
         let _ = self.jobs.send(Job::Detail {
             generation: self.detail_generation,
             style: self.draft.clone(),
@@ -980,6 +994,8 @@ impl App {
                         }
                     }
                     self.detail_area = Some(area);
+                    self.detail_texture_zoom = self.detail_requested_zoom;
+                    self.detail_shown_generation = generation;
                 }
                 Msg::Tile {
                     generation,
@@ -1042,6 +1058,35 @@ impl App {
                 self.detail_zoom = zoom as u8;
                 self.request_detail();
             }
+        }
+        // `BW_DARKROOM_SCREENSHOT_GRAIN=amount,size,roughness` sets the style's grain.
+        if let Ok(spec) = std::env::var("BW_DARKROOM_SCREENSHOT_GRAIN")
+            && let [amount, size, roughness] = spec
+                .split(',')
+                .filter_map(|p| p.trim().parse().ok())
+                .collect::<Vec<f64>>()[..]
+        {
+            let grain = bw_profiles::GrainSpec {
+                amount,
+                size,
+                roughness,
+            };
+            if self.draft.grain != grain {
+                self.draft.grain = grain;
+                self.draft_changed();
+            }
+        }
+        // `BW_DARKROOM_SCREENSHOT_THEN_PUSH=<stops>`: once the detail has arrived, change
+        // the push as the workflow panel would, and shoot after the detail re-renders.
+        if let Ok(stops) = std::env::var("BW_DARKROOM_SCREENSHOT_THEN_PUSH")
+            && let Ok(stops) = stops.parse::<f64>()
+            && !self.screenshot_then_applied
+            && self.detail_area.is_some()
+        {
+            self.screenshot_then_applied = true;
+            self.draft.set_push_stops(stops);
+            self.draft_changed();
+            self.detail_area = None;
         }
         let Some((path, started, requested)) = &mut self.screenshot else {
             return;
@@ -1825,10 +1870,15 @@ impl eframe::App for App {
             let mut zoom = self.detail_zoom;
             let ppp = self.pixels_per_point;
             egui::Window::new("Detail")
+                // A fresh id drops the oversized window size saved by earlier versions.
+                .id(egui::Id::unique("detail-window"))
                 .open(&mut open)
                 .resizable(false)
-                // Open over the right-hand panel so the outlined area on the image stays visible.
-                .default_pos([ctx.content_rect().right() - DETAIL_VIEW_PT - 40.0, 60.0])
+                // Shrink as well as grow with the content.
+                .auto_sized()
+                // Open over the left of the image, leaving the Workflow panel free to adjust
+                // while watching the detail.
+                .default_pos([ctx.content_rect().left() + 240.0, 90.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         for (z, label, help) in [
@@ -1837,6 +1887,9 @@ impl eframe::App for App {
                         ] {
                             ui.selectable_value(&mut zoom, z, label).on_hover_text(help);
                         }
+                        if self.detail.is_some() && self.detail_shown_generation != self.detail_generation {
+                            ui.spinner().on_hover_text("Updating to the latest settings");
+                        }
                         ui.label(
                             egui::RichText::new("Click the image to move the outlined area").small().weak(),
                         );
@@ -1844,7 +1897,7 @@ impl eframe::App for App {
                     match &self.detail {
                         Some(tex) => {
                             // Texture pixels → points so the zoom is exact on any display.
-                            let size = tex.size_vec2() * f32::from(self.detail_zoom) / ppp;
+                            let size = tex.size_vec2() * f32::from(self.detail_texture_zoom) / ppp;
                             ui.add(egui::Image::new(tex).fit_to_exact_size(size));
                         }
                         None => {

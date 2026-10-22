@@ -61,6 +61,39 @@ pub struct ExposureSettings {
 pub struct RenderOptions {
     pub seed: u64,
     pub geometry: FilmGeometry,
+    pub grain: GrainAdjust,
+}
+
+/// Creative adjustments to the film's grain. The default leaves the grain exactly as the
+/// film and developer produce it (design 0001 §5.2–5.3); anything else departs from the
+/// published granularity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GrainAdjust {
+    /// Multiplier on grain strength (RMS amplitude).
+    pub amount: f64,
+    /// Multiplier on the clump scale. Per-pixel strength is held, so this changes
+    /// coarseness, not strength.
+    pub size: f64,
+    /// −1 to 1. Negative blends in a larger, softer component; positive gives the grain
+    /// heavier tails (more isolated dark and bright specks), which looks gritty.
+    pub roughness: f64,
+}
+
+impl Default for GrainAdjust {
+    fn default() -> Self {
+        Self {
+            amount: 1.0,
+            size: 1.0,
+            roughness: 0.0,
+        }
+    }
+}
+
+impl GrainAdjust {
+    /// Whether this is the film's own grain, unadjusted.
+    pub fn is_film_grain(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A developed negative: total diffuse density per pixel plus the record needed to
@@ -174,6 +207,7 @@ pub fn develop(
         film.grain.clump_um,
         options.seed,
         &geometry,
+        &options.grain,
     );
 
     let base = film.base_density as f32;
@@ -205,16 +239,98 @@ fn apply_adjacency(net: &mut Plane, state: &DevelopmentState, geometry: &FilmGeo
 }
 
 /// Poisson/Selwyn grain (design 0001 §5.2–5.3).
-fn apply_grain(net: &mut Plane, area_um2: f64, clump_um: f64, seed: u64, geometry: &FilmGeometry) {
+fn apply_grain(
+    net: &mut Plane,
+    area_um2: f64,
+    clump_um: f64,
+    seed: u64,
+    geometry: &FilmGeometry,
+    adjust: &GrainAdjust,
+) {
     let (w, h) = (net.width(), net.height());
-    let white = Plane::from_fn(w, h, |x, y| noise::gaussian(seed, 0, x as u32, y as u32))
-        .expect("dimensions come from an existing plane");
-    let field = blur::gaussian_blur(&white, geometry.um_to_px(clump_um));
-    let k = (0.434 * area_um2 / geometry.pixel_area_um2()) as f32;
+    let film_sigma = geometry.um_to_px(clump_um);
+    let mut field = grain_field(
+        w,
+        h,
+        seed,
+        0,
+        film_sigma * adjust.size.max(0.05),
+        film_sigma,
+    );
+    let r = adjust.roughness.clamp(-1.0, 1.0);
+    if r < -1e-6 {
+        // Smoother: mix in an independent, coarser field, keeping per-pixel strength.
+        let other = grain_field(
+            w,
+            h,
+            seed,
+            1,
+            film_sigma * adjust.size.max(0.05) * 2.0,
+            film_sigma,
+        );
+        let (a, b) = (1.0 + r, -r);
+        let norm = 1.0 / (a * a + b * b).sqrt();
+        let (a, b) = ((a * norm) as f32, (b * norm) as f32);
+        field
+            .data_mut()
+            .par_iter_mut()
+            .zip(other.data().par_iter())
+            .for_each(|(f, &o)| *f = a * *f + b * o);
+    } else if r > 1e-6 {
+        // Grittier: raise the field's magnitude to a power above 1, which thins the
+        // middle of the distribution and fattens its tails, then restore its strength.
+        let p = (1.0 + 0.6 * r) as f32;
+        let before = std_dev(&field);
+        field
+            .data_mut()
+            .par_iter_mut()
+            .for_each(|f| *f = f.signum() * f.abs().powf(p));
+        let after = std_dev(&field);
+        if after > 0.0 {
+            let gain = (before / after) as f32;
+            field.data_mut().par_iter_mut().for_each(|f| *f *= gain);
+        }
+    }
+    let k = (0.434 * area_um2 * adjust.amount.max(0.0).powi(2) / geometry.pixel_area_um2()) as f32;
     net.data_mut()
         .par_iter_mut()
         .zip(field.data().par_iter())
         .for_each(|(d, &n)| *d += (k * d.max(0.0)).sqrt() * n);
+}
+
+/// Standard deviation of a plane, summed sequentially so it is the same on any thread count.
+fn std_dev(p: &Plane) -> f64 {
+    let n = p.data().len().max(1) as f64;
+    let mean = p.data().iter().map(|&v| f64::from(v)).sum::<f64>() / n;
+    (p.data()
+        .iter()
+        .map(|&v| (f64::from(v) - mean).powi(2))
+        .sum::<f64>()
+        / n)
+        .sqrt()
+}
+
+/// White noise blurred to `sigma_px`, scaled to the per-pixel strength it would have at
+/// `film_sigma_px`, so changing the clump size changes coarseness, not strength.
+fn grain_field(
+    w: usize,
+    h: usize,
+    seed: u64,
+    stream: u32,
+    sigma_px: f64,
+    film_sigma_px: f64,
+) -> Plane {
+    let white = Plane::from_fn(w, h, |x, y| {
+        noise::gaussian(seed, stream, x as u32, y as u32)
+    })
+    .expect("dimensions come from an existing plane");
+    let mut field = blur::gaussian_blur(&white, sigma_px);
+    if sigma_px != film_sigma_px {
+        let gain = (blur::variance_factor_2d(film_sigma_px) / blur::variance_factor_2d(sigma_px))
+            .sqrt() as f32;
+        field.data_mut().par_iter_mut().for_each(|v| *v *= gain);
+    }
+    field
 }
 
 #[cfg(test)]
@@ -264,6 +380,7 @@ mod tests {
         let options = RenderOptions {
             seed: 11,
             geometry: FilmGeometry::full_frame_35mm(200, 120).unwrap(),
+            grain: GrainAdjust::default(),
         };
         let run = |threads| {
             rayon::ThreadPoolBuilder::new()
@@ -296,6 +413,7 @@ mod tests {
             film.grain.clump_um,
             5,
             &geometry,
+            &GrainAdjust::default(),
         );
         // Box aperture with the same area as a 48 µm circle.
         let side_px = ((bw_film::GrainParams::APERTURE_48_UM2).sqrt() / 4.0).round() as usize;
@@ -319,5 +437,41 @@ mod tests {
             (rms / expected - 1.0).abs() < 0.12,
             "rms {rms}, expected {expected}"
         );
+    }
+
+    /// Per-pixel grain standard deviation on a uniform field at net D = 1.
+    fn pixel_grain_std(adjust: GrainAdjust) -> f64 {
+        let (film, _, _) = setup();
+        let n = 400;
+        let geometry = FilmGeometry::from_frame_width(n as f64 * 4.0 / 1000.0, n, n).unwrap();
+        let mut net = Plane::filled(n, n, 1.0).unwrap();
+        apply_grain(
+            &mut net,
+            film.grain.area_um2,
+            film.grain.clump_um,
+            5,
+            &geometry,
+            &adjust,
+        );
+        let v: Vec<f64> = net.data().iter().map(|&d| f64::from(d)).collect();
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        (v.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+    }
+
+    #[test]
+    fn grain_adjustments_change_only_what_they_name() {
+        let film = pixel_grain_std(GrainAdjust::default());
+        let with = |f: fn(&mut GrainAdjust)| {
+            let mut a = GrainAdjust::default();
+            f(&mut a);
+            pixel_grain_std(a) / film
+        };
+        // Amount scales strength.
+        assert!((with(|a| a.amount = 2.0) - 2.0).abs() < 0.05);
+        assert_eq!(with(|a| a.amount = 0.0), 0.0);
+        // Size and roughness change the texture but hold the per-pixel strength.
+        assert!((with(|a| a.size = 2.5) - 1.0).abs() < 0.15);
+        assert!((with(|a| a.roughness = 0.8) - 1.0).abs() < 0.15);
+        assert!((with(|a| a.roughness = -0.8) - 1.0).abs() < 0.15);
     }
 }
