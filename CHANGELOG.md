@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-22
+
 ### Fixed
 - The style "…" menu's items can be clicked again. A press on any item except the one
   nearest the "…" counted as a click outside the menu, so the menu closed before the
@@ -201,7 +203,8 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.4.0...v0.4.1

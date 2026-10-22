@@ -209,7 +209,7 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "bw-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-darkroom",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "bw-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "proptest",
  "rayon",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "bw-darkroom"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-negative",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "bw-desktop"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-io",
@@ -259,21 +259,21 @@ dependencies = [
 
 [[package]]
 name = "bw-developer"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
 ]
 
 [[package]]
 name = "bw-film"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
 ]
 
 [[package]]
 name = "bw-io"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-negative",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "bw-negative"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-developer",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "bw-profiles"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-darkroom",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "bw-raw"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bw-core",
  "bw-io",
