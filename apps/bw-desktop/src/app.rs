@@ -138,6 +138,8 @@ pub struct App {
     screenshot: Option<(PathBuf, std::time::Instant, bool)>,
     /// Screenshot runs: whether `BW_DARKROOM_SCREENSHOT_THEN_PUSH` has been applied.
     screenshot_then_applied: bool,
+    /// Screenshot runs: clicks still to inject, as (seconds after start, x, y, stage).
+    screenshot_clicks: Vec<(f64, f32, f32, u8)>,
 }
 
 impl App {
@@ -243,6 +245,20 @@ impl App {
             #[cfg(target_os = "macos")]
             menu: crate::menu::AppMenu::install(&cc.egui_ctx),
             screenshot_then_applied: false,
+            // `BW_DARKROOM_SCREENSHOT_CLICKS=t:x,y;t:x,y` clicks at window points (x, y)
+            // t seconds after start, through egui's own input: real interaction in tests.
+            screenshot_clicks: std::env::var("BW_DARKROOM_SCREENSHOT_CLICKS")
+                .ok()
+                .map(|v| {
+                    v.split(';')
+                        .filter_map(|c| {
+                            let (t, xy) = c.split_once(':')?;
+                            let (x, y) = xy.split_once(',')?;
+                            Some((t.parse().ok()?, x.parse().ok()?, y.parse().ok()?, 0))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
@@ -581,9 +597,11 @@ impl App {
                     });
                 });
             });
-        // A press away from the menu (and not on the "…" that opened it) closes it.
+        // A press away from the menu (and not on the "…" that opened it) closes it. The
+        // container test counts the menu's own items: plain `contains_pointer` is false
+        // over a child widget, which closed the menu on the press before an item's click.
         let clicked_elsewhere = ctx.input(|i| i.pointer.any_pressed())
-            && !area.response.contains_pointer()
+            && !area.response.container_contains_pointer()
             && ctx
                 .input(|i| i.pointer.interact_pos())
                 .is_some_and(|p| p.distance(pos) > 30.0);
@@ -1134,7 +1152,13 @@ impl App {
         let rendered = (self.preview.is_some() || self.summary.is_none())
             && !self.tiles.iter().any(|t| matches!(t, Tile::Pending))
             && (detail_spec.is_none() || self.detail_area.is_some());
-        if !*requested && (rendered || started.elapsed().as_secs() > 30) {
+        // `BW_DARKROOM_SCREENSHOT_WAIT=<seconds>` holds the shot, e.g. for scripted clicks.
+        let wait = std::env::var("BW_DARKROOM_SCREENSHOT_WAIT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        let rendered = rendered && started.elapsed().as_secs() >= wait;
+        if !*requested && (rendered || started.elapsed().as_secs() > 30.max(wait + 5)) {
             *requested = true;
             let path = path.clone();
             ctx.request_screenshot(move |image| {
@@ -1912,6 +1936,31 @@ impl eframe::App for App {
             if !open {
                 self.detail_enabled = false;
             }
+        }
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let Some((_, started, _)) = &self.screenshot else {
+            return;
+        };
+        let now = started.elapsed().as_secs_f64();
+        // Move, press, release on successive frames, one click at a time.
+        if let Some(click) = self.screenshot_clicks.iter_mut().find(|c| c.3 < 3) {
+            if now >= click.0 {
+                let pos = egui::pos2(click.1, click.2);
+                let event = match click.3 {
+                    0 => egui::Event::PointerMoved(pos),
+                    stage => egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: stage == 1,
+                        modifiers: Default::default(),
+                    },
+                };
+                raw_input.events.push(event);
+                click.3 += 1;
+            }
+            ctx.request_repaint();
         }
     }
 

@@ -5,6 +5,11 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- The style "…" menu's items can be clicked again. A press on any item except the one
+  nearest the "…" counted as a click outside the menu, so the menu closed before the
+  click finished.
+
 ## [0.6.0] - 2026-10-22
 
 ### Added
