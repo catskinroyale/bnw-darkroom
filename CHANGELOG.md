@@ -10,7 +10,7 @@ All notable changes to this project are recorded here. The format follows
   opening photos, image adjustments, styles and presets, the workflow views, push and
   pull, grain, the Detail window, printing, managing styles, exporting, shortcuts, where
   files are stored and troubleshooting. The README links to it.
-- An app screenshot at the top of the README.
+- An app screenshot at the top of the README, showing one of the author's own photos.
 
 ### Fixed
 - The export dialog's `{ei}` token help now says "developed for" rather than "rated at",
