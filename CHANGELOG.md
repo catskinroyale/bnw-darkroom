@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-22
+
 ### Added
 - **User guide** in [docs/USER_GUIDE.md](docs/USER_GUIDE.md): installing, the window,
   opening photos, image adjustments, styles and presets, the workflow views, push and
@@ -216,7 +218,8 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.4.1...v0.5.0
