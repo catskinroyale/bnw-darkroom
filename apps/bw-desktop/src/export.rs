@@ -135,7 +135,7 @@ pub const TOKENS: [(&str, &str); 8] = [
     ("{style}", "Style name"),
     ("{film}", "Film"),
     ("{developer}", "Developer and dilution"),
-    ("{ei}", "Exposure index the film was rated at"),
+    ("{ei}", "Exposure index the film was developed for"),
     ("{date}", "Export date, YYYY-MM-DD (UTC)"),
     ("{time}", "Export time, HHMMSS (UTC)"),
     (

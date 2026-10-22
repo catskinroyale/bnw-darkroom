@@ -5,6 +5,16 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **User guide** in [docs/USER_GUIDE.md](docs/USER_GUIDE.md): installing, the window,
+  opening photos, image adjustments, styles and presets, the workflow views, push and
+  pull, grain, the Detail window, printing, managing styles, exporting, shortcuts, where
+  files are stored and troubleshooting. The README links to it.
+
+### Fixed
+- The export dialog's `{ei}` token help now says "developed for" rather than "rated at",
+  matching push and pull as development changes.
+
 ## [0.6.1] - 2026-10-22
 
 ### Fixed

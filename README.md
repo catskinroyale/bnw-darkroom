@@ -8,6 +8,8 @@ interact through a simulated negative; printing is a separate stage on that nega
 > placeholders, not yet fitted to manufacturer sensitometry. Product names describe the
 > intended target only. See [design 0001](docs/design/0001-negative-simulation-model.md).
 
+**Using the app:** see the [user guide](docs/USER_GUIDE.md).
+
 ## Layout
 
 | Path | Contents |
