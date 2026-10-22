@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-22
+
 ### Changed
 - **A new interface, following LightCraft's design.**
   - **Look:** the Inter typeface; LightCraft's Charcoal (dark) and Silver (light) themes;
@@ -255,7 +257,8 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.5.0...v0.6.0
