@@ -11,6 +11,8 @@ All notable changes to this project are recorded here. The format follows
   pull, grain, the Detail window, printing, managing styles, exporting, shortcuts, where
   files are stored and troubleshooting. The README links to it.
 - An app screenshot at the top of the README, showing one of the author's own photos.
+- A **Download** section in the README linking to the latest release's macOS app, with
+  install steps, for people who don't want to compile.
 
 ### Fixed
 - The export dialog's `{ei}` token help now says "developed for" rather than "rated at",

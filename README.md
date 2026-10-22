@@ -10,7 +10,20 @@ interact through a simulated negative; printing is a separate stage on that nega
 > placeholders, not yet fitted to manufacturer sensitometry. Product names describe the
 > intended target only. See [design 0001](docs/design/0001-negative-simulation-model.md).
 
-**Using the app:** see the [user guide](docs/USER_GUIDE.md).
+## Download
+
+**[Download the latest macOS app](https://github.com/catskinroyale/bnw-darkroom/releases/latest)**:
+open the release and download `BW-Darkroom-<version>-arm64.dmg` from its Assets. No
+compiling needed.
+
+- Requires a Mac with Apple Silicon (M1 or later).
+- Open the DMG and drag **BW Darkroom** to **Applications**.
+- The app isn't notarised by Apple, so open it the first time with **right-click → Open**,
+  or allow it in System Settings → Privacy & Security.
+
+Every version is listed on the [releases page](https://github.com/catskinroyale/bnw-darkroom/releases).
+To use the app, see the [user guide](docs/USER_GUIDE.md). To build it yourself, see
+[Build and run](#build-and-run).
 
 ## Layout
 
