@@ -6,6 +6,40 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A new interface, following LightCraft's design.**
+  - **Look:** the Inter typeface; LightCraft's Charcoal (dark) and Silver (light) themes;
+    the photo on a darker canvas.
+  - **Tool strip:** a column of icons at the far right chooses the panel beside it
+    (**Develop**, **Styles**) and holds **Export** and **About**.
+  - **Develop panel:** a header with **Save**, **Save as…** and **Revert**, a **Style**
+    picker, and accordion sections (**Image**, **Film**, **Development**, **Grain**,
+    **Print**) that remember whether they're open.
+  - **Advanced controls** sit in expandable rows instead of a separate Detailed view:
+    **Temperature & highlights**, **Development details** (EI, exposure compensation,
+    time, temperature, agitation) and **Characteristic curve**.
+  - **Styles panel:** styles in collapsible groups (**Films & processes**,
+    **Photographers**, **My styles**), with the **…** menu on hover and on right-click.
+    The photographer presets live here, and hovering one shows its look and what is
+    documented.
+  - **Sliders:** label and value above a thin track with a ring knob. Shift-drag for fine
+    control, double-click to reset, click the value to type one.
+  - **Removed:** the Simple / Detailed / Photographers switch, and the separate style
+    editor window. **Edit…** now opens every section of the Develop panel.
+  - **Credits:** the About window credits LightCraft (MIT) and Inter (SIL Open Font
+    License) and includes both licences.
+
+### Added
+- **Drag inside the Detail window** to move the area you're inspecting, as if moving the
+  photo under a loupe. The view follows the pointer straight away and sharpens when the
+  new render arrives; the area stays inside the photo.
+- **Update notices.** Once a day at start-up the app asks GitHub for the latest release.
+  If it's newer, an **Update** button appears in the top bar, opening a Software Update
+  window with the release notes and **Download…**, **Later** and **Skip This Version**.
+  **BW Darkroom ▸ Check for Updates…** and a button in the About window check straight
+  away, and the daily check can be turned off. Nothing is downloaded or installed
+  automatically, and nothing is sent beyond the request itself.
+
+### Changed
 - The README no longer has a Versioning section.
 
 ## [0.6.2] - 2026-10-22

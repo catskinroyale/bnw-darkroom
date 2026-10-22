@@ -1,20 +1,20 @@
-//! The Workflow panel: a simple view (film, developer, push/pull, grain) and a
-//! detailed view (every processing and printing control). Every control carries a
-//! one- or two-line hover explanation of what it does and how it changes the image.
+//! The Develop panel's sections: Film, Development, Grain and Print, with advanced
+//! controls in expandable rows. Every control carries a one- or two-line hover
+//! explanation of what it does and how it changes the image.
 
 use bw_negative::times::TimeOrigin;
 use bw_profiles::{AgitationSpec, GrainSpec, ModelSummary, Style};
 use eframe::egui::{self, Color32, Pos2, Sense, Stroke, Vec2};
+
+use crate::widgets::{self, Icon, Segment, SliderSpec, inset};
 
 mod help {
     pub const FILM: &str = "The emulsion. It sets how colours turn into greys, the shape of the tone curve, sharpness and grain.";
     pub const DEVELOPER: &str = "The chemistry. It changes speed, contrast, grain and edge sharpness; the dilution changes how strongly.";
     pub const DILUTION: &str = "How much the developer is diluted. More dilute: longer times, more edge sharpness and highlight compensation.";
     pub const PUSH: &str = "Develop longer (push) or shorter (pull), using the published time for the pushed or pulled EI.\nYour photo's exposure is kept and the print's black point holds: a push keeps blacks, opens shadows slightly,\nbrightens highlights and adds grain; a pull softens contrast. For an underexposed push, lower Exposure comp.";
-    pub const GRAIN: &str = "Grain comes from the film and developer. The more the negative is enlarged, the more it shows.";
     pub const FORMAT: &str = "Film size. A larger negative is enlarged less for the same print, so its grain looks finer.";
     pub const CROP: &str = "Use only the centre of the frame. Cropping means enlarging the negative more, so grain grows.";
-    pub const GRAIN_SEED: &str = "Picks the random grain pattern. The same number gives identical grain; the amount does not change.";
     pub const NEW_PATTERN: &str = "Same grain amount and character, a different random pattern.";
     pub const GRAIN_SIZE: &str = "Coarseness of the grain clumps, relative to the film's own. Strength stays the same.\n×1 is the film's grain.";
     pub const GRAIN_AMOUNT: &str =
@@ -24,7 +24,6 @@ mod help {
     pub const RANDOMISE: &str =
         "A new random pattern with random size, amount and roughness, within a usable range.";
     pub const GRAIN_READOUT: &str = "Diffuse RMS granularity at this enlargement (Kodak's measure).\nAround 10 looks smooth; above 25 looks gritty.";
-    pub const NAME: &str = "Name of this style, used in the style list and in exported file names.";
     pub const EI: &str = "Exposure index the film is developed for: picks the published time. The film is still exposed\nat box speed, because your photo is already exposed; use Exposure comp. to under- or over-expose it.";
     pub const EV: &str = "Under- or over-exposes the film in stops, like the camera's exposure compensation.\nWith a push, a negative value gives the classic underexposed push: empty shadows.";
     pub const TIME: &str = "Development time. 'Published' follows the time table for this film, developer and EI;\nuntick it to set your own. Longer development raises contrast and grain.";
@@ -128,112 +127,6 @@ const FORMATS: [(&str, f64, &str); 5] = [
     ),
 ];
 
-/// Which form the Workflow panel takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum View {
-    Simple,
-    Detailed,
-    Photographers,
-}
-
-impl View {
-    pub const ALL: [(View, &'static str, &'static str); 3] = [
-        (
-            View::Simple,
-            "Simple",
-            "Film, developer, push/pull and grain as quick choices",
-        ),
-        (
-            View::Detailed,
-            "Detailed",
-            "Every processing and printing control",
-        ),
-        (
-            View::Photographers,
-            "Photographers",
-            "Presets inspired by photographers' documented materials and printing",
-        ),
-    ];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            View::Simple => "simple",
-            View::Detailed => "detailed",
-            View::Photographers => "photographers",
-        }
-    }
-
-    pub fn from_key(key: &str) -> View {
-        match key {
-            "detailed" => View::Detailed,
-            "photographers" => View::Photographers,
-            _ => View::Simple,
-        }
-    }
-}
-
-/// Photographer presets: each card shows the look and what is documented versus
-/// interpreted. Returns the index of the preset to apply.
-pub fn photographers(
-    ui: &mut egui::Ui,
-    current: &Style,
-    presets: &[bw_profiles::Preset],
-) -> Option<usize> {
-    let mut chosen = None;
-    ui.label(
-        egui::RichText::new(
-            "Recipes built from the app's film, developer and printing models, informed by each \
-             photographer's documented practice. They are interpretations, not reproductions.",
-        )
-        .small()
-        .weak(),
-    );
-    for (i, p) in presets.iter().enumerate() {
-        let selected = current.name == p.style.name;
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(p.photographer).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if selected { "Applied" } else { "Apply" };
-                    if ui
-                        .add(egui::Button::selectable(selected, label))
-                        .on_hover_text("Use this film, developer, processing and print recipe")
-                        .clicked()
-                    {
-                        chosen = Some(i);
-                    }
-                });
-            });
-            ui.label(egui::RichText::new(p.look).small());
-            let s = &p.style;
-            let mut recipe = format!(
-                "{} · {} · EI {:.0} · {} · grade {:.1}",
-                bw_profiles::film_label(&s.film),
-                bw_profiles::developer_label(&s.developer),
-                s.exposure_index,
-                FORMATS
-                    .iter()
-                    .find(|(_, mm, _)| (s.format_mm - mm).abs() < 0.5)
-                    .map_or("custom format", |f| f.0),
-                s.print.grade
-            );
-            if p.scene_contrast != 0.0 {
-                recipe.push_str(&format!(" · scene contrast {:+.0}", p.scene_contrast));
-            }
-            ui.label(egui::RichText::new(recipe).small().weak());
-            egui::CollapsingHeader::new(egui::RichText::new("What's documented").small())
-                .id_salt(("basis", i))
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new(p.basis).small());
-                });
-        });
-    }
-    chosen
-}
-
-const CROPS: [(&str, f64); 4] = [("Full frame", 1.0), ("1.5×", 1.5), ("2×", 2.0), ("3×", 3.0)];
-
 const PUSHES: [(&str, f64); 6] = [
     ("Pull 2", -2.0),
     ("Pull 1", -1.0),
@@ -285,30 +178,6 @@ fn dilution_help(family: &str, dilution: &str) -> &'static str {
     }
 }
 
-/// A toggle chip like the top bar's panel buttons. Returns true when clicked.
-fn chip(
-    ui: &mut egui::Ui,
-    selected: bool,
-    enabled: bool,
-    label: &str,
-    help: &str,
-    disabled_help: &str,
-) -> bool {
-    let response = ui.add_enabled(enabled, egui::Button::selectable(selected, label));
-    let response = if enabled {
-        response.on_hover_text(help)
-    } else {
-        response.on_disabled_hover_text(disabled_help)
-    };
-    response.clicked()
-}
-
-fn section(ui: &mut egui::Ui, title: &str, help: &str) {
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new(title).strong())
-        .on_hover_text(help);
-}
-
 /// Switch film, keeping the push/pull and a developer that has a published time.
 fn change_film(s: &mut Style, film: &str) {
     let stops = s.push_stops();
@@ -341,222 +210,6 @@ fn origin_label(origin: Option<TimeOrigin>) -> &'static str {
     }
 }
 
-fn film_chips(ui: &mut egui::Ui, s: &mut Style) {
-    section(ui, "Film", help::FILM);
-    ui.horizontal_wrapped(|ui| {
-        for (id, label, help) in FILMS {
-            if chip(ui, s.film == id, true, label, help, "") && s.film != id {
-                change_film(s, id);
-            }
-        }
-    });
-}
-
-fn developer_chips(ui: &mut egui::Ui, s: &mut Style) {
-    section(ui, "Developer", help::DEVELOPER);
-    let (family, dilution) = {
-        let (f, d) = bw_profiles::split_developer(&s.developer);
-        (f.to_string(), d.to_string())
-    };
-    ui.horizontal_wrapped(|ui| {
-        for (fam, dilutions) in bw_profiles::developer_families() {
-            let first = dilutions
-                .iter()
-                .map(|d| format!("{fam}-{d}"))
-                .find(|id| bw_profiles::is_available(&s.film, id));
-            let label = bw_profiles::developer_family_label(fam);
-            let no_data = format!("No published {label} times for this film.");
-            if chip(
-                ui,
-                family == *fam,
-                first.is_some(),
-                label,
-                developer_help(fam),
-                &no_data,
-            ) && family != *fam
-                && let Some(id) = first
-            {
-                change_developer(s, id);
-            }
-        }
-    });
-    if let Some((fam, dilutions)) = bw_profiles::developer_families()
-        .iter()
-        .find(|(f, _)| *f == family)
-    {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Dilution").weak())
-                .on_hover_text(help::DILUTION);
-            for d in dilutions.iter() {
-                let id = format!("{fam}-{d}");
-                let available = bw_profiles::is_available(&s.film, &id);
-                let label = bw_profiles::dilution_label(fam, d);
-                if chip(
-                    ui,
-                    dilution == *d,
-                    available,
-                    &label,
-                    dilution_help(fam, d),
-                    "No published time for this film at this dilution.",
-                ) && dilution != *d
-                {
-                    change_developer(s, id);
-                }
-            }
-        });
-    }
-}
-
-fn push_chips(ui: &mut egui::Ui, s: &mut Style) {
-    section(ui, "Push / pull", help::PUSH);
-    let current = s.push_stops();
-    ui.horizontal_wrapped(|ui| {
-        for (label, stops) in PUSHES {
-            let mut probe = s.clone();
-            probe.set_push_stops(stops);
-            let time = probe.recommended_time();
-            let help = match time {
-                Some(t) => format!(
-                    "Develop {:.1} min, as for EI {:.0} ({}).",
-                    t.time_min,
-                    probe.exposure_index,
-                    origin_label(Some(t.origin))
-                ),
-                None => format!("Develop as for EI {:.0}.", probe.exposure_index),
-            };
-            let selected = (current - stops).abs() < 0.17 && s.development.time_min.is_none();
-            if chip(ui, selected, true, label, &help, "") {
-                s.set_push_stops(stops);
-            }
-        }
-    });
-}
-
-fn development_readout(ui: &mut egui::Ui, s: &Style, summary: Option<&ModelSummary>) {
-    let Some(m) = summary else { return };
-    let text = format!(
-        "Develop {:.1} min at {:.0} °C, as for EI {:.0} · {}",
-        m.time_min,
-        s.development.temperature_c,
-        s.exposure_index,
-        origin_label(m.time_origin)
-    );
-    ui.label(egui::RichText::new(text).small().weak())
-        .on_hover_text(help::TIME);
-}
-
-fn grain_section(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>) {
-    section(ui, "Grain", help::GRAIN);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("Format").weak())
-            .on_hover_text(help::FORMAT);
-        for (label, mm, help) in FORMATS {
-            if chip(ui, (s.format_mm - mm).abs() < 0.5, true, label, help, "") {
-                s.format_mm = mm;
-            }
-        }
-    });
-    ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("Enlarge").weak())
-            .on_hover_text(help::CROP);
-        for (label, crop) in CROPS {
-            let help = if crop == 1.0 {
-                "Use the whole frame.".to_string()
-            } else {
-                format!("Use the central 1/{crop} of the frame's width, enlarged {crop}× more.")
-            };
-            if chip(ui, (s.crop - crop).abs() < 0.01, true, label, &help, "") {
-                s.crop = crop;
-            }
-        }
-    });
-    grain_controls(ui, s);
-    if let Some(m) = summary {
-        grain_readout(ui, s, m);
-    }
-    ui.label(
-        egui::RichText::new("Press D and click the image to judge grain at 1:1.")
-            .small()
-            .weak(),
-    );
-}
-
-/// Grain size, amount and roughness sliders, with reset, randomise and new pattern.
-fn grain_controls(ui: &mut egui::Ui, s: &mut Style) {
-    egui::Grid::new("grain-controls")
-        .num_columns(2)
-        .spacing([8.0, 4.0])
-        .show(ui, |ui| {
-            ui.label("Size").on_hover_text(help::GRAIN_SIZE);
-            ui.add(
-                egui::Slider::new(&mut s.grain.size, 0.5..=3.0)
-                    .logarithmic(true)
-                    .fixed_decimals(2)
-                    .prefix("×"),
-            )
-            .on_hover_text(help::GRAIN_SIZE);
-            ui.end_row();
-            ui.label("Amount").on_hover_text(help::GRAIN_AMOUNT);
-            ui.add(
-                egui::Slider::new(&mut s.grain.amount, 0.0..=3.0)
-                    .fixed_decimals(2)
-                    .prefix("×"),
-            )
-            .on_hover_text(help::GRAIN_AMOUNT);
-            ui.end_row();
-            ui.label("Roughness").on_hover_text(help::GRAIN_ROUGHNESS);
-            let mut rough = (s.grain.roughness * 100.0).round() as i32;
-            if ui
-                .add(egui::Slider::new(&mut rough, -100..=100))
-                .on_hover_text(help::GRAIN_ROUGHNESS)
-                .changed()
-            {
-                s.grain.roughness = f64::from(rough) / 100.0;
-            }
-            ui.end_row();
-        });
-    ui.horizontal_wrapped(|ui| {
-        if ui
-            .add_enabled(
-                !s.grain.is_film_grain(),
-                egui::Button::new("Film's grain").small(),
-            )
-            .on_hover_text(help::FILM_GRAIN)
-            .clicked()
-        {
-            s.grain = GrainSpec::default();
-        }
-        if ui
-            .small_button("Randomise")
-            .on_hover_text(help::RANDOMISE)
-            .clicked()
-        {
-            randomise_grain(s);
-        }
-        if ui
-            .small_button("New pattern")
-            .on_hover_text(help::NEW_PATTERN)
-            .clicked()
-        {
-            s.seed = s.seed.wrapping_add(1);
-        }
-    });
-}
-
-fn grain_readout(ui: &mut egui::Ui, s: &Style, m: &ModelSummary) {
-    let adjusted = if s.grain.is_film_grain() {
-        ""
-    } else {
-        " · adjusted from the film"
-    };
-    ui.label(format!(
-        "Grain at print: {} ({:.0}){adjusted}",
-        m.grain.describe(),
-        m.grain.at_print
-    ))
-    .on_hover_text(help::GRAIN_READOUT);
-}
-
 /// Random grain within a usable range, and a new pattern.
 fn randomise_grain(s: &mut Style) {
     let nanos = std::time::SystemTime::now()
@@ -581,158 +234,462 @@ fn randomise_grain(s: &mut Style) {
     s.seed = next() % 100_000;
 }
 
-/// Simple view: choices as toggle chips, no printing controls.
-pub fn simple(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>) {
-    film_chips(ui, s);
-    developer_chips(ui, s);
-    push_chips(ui, s);
-    development_readout(ui, s, summary);
-    grain_section(ui, s, summary);
-}
+/// Section and expandable-row keys, in panel order (for "Edit…", which opens them all).
+pub const SECTION_KEYS: [&str; 7] = [
+    "film",
+    "development",
+    "development.details",
+    "development.curve",
+    "grain",
+    "print",
+    "image",
+];
 
-/// Detailed view: every control.
-pub fn detailed(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>) {
-    // Size controls to the panel so it can be resized narrower than their defaults.
-    let control_w = (ui.available_width() - 128.0).max(96.0);
-    ui.spacing_mut().slider_width = (control_w - 64.0).max(40.0);
-    ui.spacing_mut().combo_width = control_w;
-
-    egui::Grid::new("detailed").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        ui.label("Name").on_hover_text(help::NAME);
-        ui.add(egui::TextEdit::singleline(&mut s.name).desired_width(control_w)).on_hover_text(help::NAME);
-        ui.end_row();
-
-        ui.label("Film").on_hover_text(help::FILM);
-        let film_label = FILMS.iter().find(|(id, ..)| *id == s.film).map_or(s.film.clone(), |(_, l, _)| l.to_string());
-        let mut film = s.film.clone();
-        egui::ComboBox::from_id_salt("film").selected_text(film_label).show_ui(ui, |ui| {
-            for (id, label, help) in FILMS {
-                ui.selectable_value(&mut film, id.to_string(), label).on_hover_text(help);
-            }
-        });
-        if film != s.film {
-            change_film(s, &film);
-        }
-        ui.end_row();
-
-        ui.label("Developer").on_hover_text(help::DEVELOPER);
-        let mut developer = s.developer.clone();
-        egui::ComboBox::from_id_salt("developer")
-            .selected_text(bw_profiles::developer_label(&s.developer))
-            .show_ui(ui, |ui| {
-                for id in bw_profiles::developer_ids() {
-                    let (fam, dil) = bw_profiles::split_developer(id);
-                    let available = bw_profiles::is_available(&s.film, id);
-                    ui.add_enabled_ui(available, |ui| {
-                        ui.selectable_value(&mut developer, id.to_string(), bw_profiles::developer_label(id))
-                            .on_hover_text(dilution_help(fam, dil))
-                            .on_disabled_hover_text("No published time for this film.");
-                    });
-                }
-            });
-        if developer != s.developer {
-            change_developer(s, developer);
-        }
-        ui.end_row();
-
-        ui.label("Develop for EI").on_hover_text(help::EI);
-        ui.horizontal(|ui| {
-            ui.add(egui::DragValue::new(&mut s.exposure_index).range(6.0..=12800.0).speed(5.0).suffix(" EI"))
-                .on_hover_text(help::EI);
-            let stops = s.push_stops();
-            let label = match stops {
-                x if x > 0.05 => format!("push {x:+.1}"),
-                x if x < -0.05 => format!("pull {:.1}", -x),
-                _ => "box speed".into(),
-            };
-            ui.label(egui::RichText::new(label).weak()).on_hover_text(help::PUSH);
-        });
-        ui.end_row();
-
-        ui.label("Exposure comp.").on_hover_text(help::EV);
-        ui.add(egui::Slider::new(&mut s.ev_compensation, -3.0..=3.0).step_by(1.0 / 3.0).suffix(" EV"))
-            .on_hover_text(help::EV);
-        ui.end_row();
-
-        ui.label("Time").on_hover_text(help::TIME);
-        ui.horizontal(|ui| {
-            let mut published = s.development.time_min.is_none();
-            if ui.checkbox(&mut published, "published").on_hover_text(help::TIME).changed() {
-                s.development.time_min = if published {
-                    None
-                } else {
-                    Some(s.processing().time_min)
-                };
-            }
-            if let Some(t) = &mut s.development.time_min {
-                ui.add(egui::DragValue::new(t).range(1.0..=120.0).speed(0.1).suffix(" min")).on_hover_text(help::TIME);
-            } else if let Some(t) = s.recommended_time() {
-                ui.label(egui::RichText::new(format!("{:.2} min", t.time_min)).weak())
-                    .on_hover_text(origin_label(Some(t.origin)));
-            }
-        });
-        ui.end_row();
-
-        ui.label("Temperature").on_hover_text(help::TEMP);
-        ui.add(egui::Slider::new(&mut s.development.temperature_c, 16.0..=28.0).step_by(0.5).suffix(" °C"))
-            .on_hover_text(help::TEMP);
-        ui.end_row();
-
-        ui.label("Agitation").on_hover_text(help::AGITATION);
-        egui::ComboBox::from_id_salt("agitation")
-            .selected_text(s.development.agitation.label())
-            .show_ui(ui, |ui| {
-                let a = &mut s.development.agitation;
-                ui.selectable_value(a, AgitationSpec::Continuous, "Continuous")
-                    .on_hover_text("Rotary or constant inversion: even development, least edge effect.");
-                ui.selectable_value(a, AgitationSpec::Intermittent { interval_s: 30.0 }, "Every 30 s")
-                    .on_hover_text("The reference scheme for the published times.");
-                ui.selectable_value(a, AgitationSpec::Intermittent { interval_s: 60.0 }, "Every 60 s")
-                    .on_hover_text("Gentler: slightly more edge effect and compensation.");
-                ui.selectable_value(a, AgitationSpec::SemiStand { mid_agitations: 1 }, "Semi-stand")
-                    .on_hover_text("One agitation halfway: strong compensation and edge effects.");
-                ui.selectable_value(a, AgitationSpec::Stand, "Stand")
-                    .on_hover_text("No agitation after the start: strongest compensation and edges; set a long time.");
-            });
-        ui.end_row();
-
-        ui.label("Format").on_hover_text(help::FORMAT);
-        let format_label = FORMATS.iter().find(|(_, mm, _)| (s.format_mm - mm).abs() < 0.5).map_or("custom", |f| f.0);
-        egui::ComboBox::from_id_salt("format").selected_text(format_label).show_ui(ui, |ui| {
-            for (label, mm, help) in FORMATS {
-                ui.selectable_value(&mut s.format_mm, mm, label).on_hover_text(help);
-            }
-        });
-        ui.end_row();
-
-        ui.label("Enlarge (crop)").on_hover_text(help::CROP);
-        ui.add(egui::Slider::new(&mut s.crop, 1.0..=4.0).step_by(0.1).suffix("×")).on_hover_text(help::CROP);
-        ui.end_row();
-
-        ui.label("Grain seed").on_hover_text(help::GRAIN_SEED);
-        ui.add(egui::DragValue::new(&mut s.seed)).on_hover_text(help::GRAIN_SEED);
-        ui.end_row();
-
-        ui.label("Paper grade").on_hover_text(help::GRADE);
-        ui.add(egui::Slider::new(&mut s.print.grade, 0.0..=5.0).step_by(0.5)).on_hover_text(help::GRADE);
-        ui.end_row();
-
-        ui.label("Print exposure").on_hover_text(help::PRINT_EXPOSURE);
-        ui.add(egui::Slider::new(&mut s.print.exposure_stops, -2.0..=2.0).step_by(1.0 / 6.0).suffix(" stops"))
-            .on_hover_text(help::PRINT_EXPOSURE);
-        ui.end_row();
-    });
-
-    ui.add_space(4.0);
-    section(ui, "Grain", help::GRAIN);
-    grain_controls(ui, s);
-    if let Some(m) = summary {
-        grain_readout(ui, s, m);
+fn spec<'a>(
+    id: &'a str,
+    label: &'a str,
+    help: &'a str,
+    (min, max, default, step): (f64, f64, f64, f64),
+    decimals: usize,
+    suffix: &'a str,
+) -> SliderSpec<'a> {
+    SliderSpec {
+        id,
+        label,
+        help,
+        min,
+        max,
+        default,
+        step,
+        decimals,
+        suffix,
+        signed: false,
+        log: false,
     }
-    ui.add_space(6.0);
-    model_panel(ui, summary);
 }
 
+fn film_label(id: &str) -> String {
+    FILMS.iter().find(|(f, ..)| *f == id).map_or_else(
+        || bw_profiles::film_label(id),
+        |(_, label, _)| label.to_string(),
+    )
+}
+
+/// Film: stock, format and enlargement.
+pub fn film_section(ui: &mut egui::Ui, s: &mut Style) {
+    let current = film_label(&s.film);
+    let mut chosen = None;
+    widgets::dropdown(ui, "film", "Film", &current, help::FILM, |ui| {
+        for (id, label, help) in FILMS {
+            if ui
+                .add(egui::Button::selectable(s.film == id, label))
+                .on_hover_text(help)
+                .clicked()
+            {
+                chosen = Some(id);
+            }
+        }
+    });
+    if let Some(id) = chosen
+        && s.film != id
+    {
+        change_film(s, id);
+    }
+    if let Some((_, _, about)) = FILMS.iter().find(|(id, ..)| *id == s.film) {
+        widgets::note(ui, *about, "");
+    }
+    widgets::subtitle(ui, "Format", help::FORMAT);
+    let formats: Vec<Segment> = FORMATS
+        .iter()
+        .map(|(label, mm, help)| Segment {
+            label,
+            selected: (s.format_mm - mm).abs() < 0.5,
+            enabled: true,
+            help,
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(ui, &formats, 3) {
+        s.format_mm = FORMATS[i].1;
+    }
+    widgets::slider(
+        ui,
+        &spec(
+            "film.enlarge",
+            "Enlarge",
+            help::CROP,
+            (1.0, 4.0, 1.0, 0.1),
+            1,
+            "×",
+        ),
+        &mut s.crop,
+        true,
+    );
+}
+
+/// Development: developer, dilution, push/pull; details and the curve in expandable rows.
+pub fn development_section(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>) {
+    let (family, dilution) = {
+        let (f, d) = bw_profiles::split_developer(&s.developer);
+        (f.to_string(), d.to_string())
+    };
+    let mut chosen = None;
+    widgets::dropdown(
+        ui,
+        "developer",
+        "Developer",
+        bw_profiles::developer_family_label(&family),
+        help::DEVELOPER,
+        |ui| {
+            for (fam, dilutions) in bw_profiles::developer_families() {
+                let first = dilutions
+                    .iter()
+                    .map(|d| format!("{fam}-{d}"))
+                    .find(|id| bw_profiles::is_available(&s.film, id));
+                let label = bw_profiles::developer_family_label(fam);
+                let r = ui
+                    .add_enabled(
+                        first.is_some(),
+                        egui::Button::selectable(family == *fam, label),
+                    )
+                    .on_hover_text(developer_help(fam))
+                    .on_disabled_hover_text(format!("No published {label} times for this film."));
+                if r.clicked() {
+                    chosen = first;
+                }
+            }
+        },
+    );
+    if let Some(id) = chosen
+        && id != s.developer
+    {
+        change_developer(s, id);
+    }
+    if let Some((fam, dilutions)) = bw_profiles::developer_families()
+        .iter()
+        .find(|(f, _)| *f == family)
+        && dilutions.len() > 1
+    {
+        widgets::subtitle(ui, "Dilution", help::DILUTION);
+        let labels: Vec<String> = dilutions
+            .iter()
+            .map(|d| bw_profiles::dilution_label(fam, d))
+            .collect();
+        let segments: Vec<Segment> = dilutions
+            .iter()
+            .zip(&labels)
+            .map(|(d, label)| Segment {
+                label,
+                selected: dilution == *d,
+                enabled: bw_profiles::is_available(&s.film, &format!("{fam}-{d}")),
+                help: dilution_help(fam, d),
+            })
+            .collect();
+        if let Some(i) = widgets::segmented(ui, &segments, 4) {
+            change_developer(s, format!("{fam}-{}", dilutions[i]));
+        }
+    }
+
+    widgets::subtitle(ui, "Push / pull", help::PUSH);
+    let current = s.push_stops();
+    let helps: Vec<String> = PUSHES
+        .iter()
+        .map(|(_, stops)| {
+            let mut probe = s.clone();
+            probe.set_push_stops(*stops);
+            match probe.recommended_time() {
+                Some(t) => format!(
+                    "Develop {:.1} min, as for EI {:.0} ({}).",
+                    t.time_min,
+                    probe.exposure_index,
+                    origin_label(Some(t.origin))
+                ),
+                None => format!("Develop as for EI {:.0}.", probe.exposure_index),
+            }
+        })
+        .collect();
+    let segments: Vec<Segment> = PUSHES
+        .iter()
+        .zip(&helps)
+        .map(|((label, stops), help)| Segment {
+            label,
+            selected: (current - stops).abs() < 0.17 && s.development.time_min.is_none(),
+            enabled: true,
+            help,
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(ui, &segments, 3) {
+        s.set_push_stops(PUSHES[i].1);
+    }
+    if let Some(m) = summary {
+        widgets::note(
+            ui,
+            format!(
+                "Develop {:.1} min at {:.0} °C · {}",
+                m.time_min,
+                s.development.temperature_c,
+                origin_label(m.time_origin)
+            ),
+            help::TIME,
+        );
+    } else {
+        widgets::note(
+            ui,
+            "No published development time for this film and developer.",
+            "",
+        );
+    }
+    ui.add_space(4.0);
+
+    widgets::flyout(
+        ui,
+        "development.details",
+        "Development details",
+        "EI, exposure compensation, time, temperature and agitation",
+        Icon::Dial,
+        |ui| development_details(ui, s),
+    );
+    widgets::flyout(
+        ui,
+        "development.curve",
+        "Characteristic curve",
+        help::CURVE,
+        Icon::Curve,
+        |ui| inset(ui, |ui| model_panel(ui, summary)),
+    );
+}
+
+fn development_details(ui: &mut egui::Ui, s: &mut Style) {
+    let box_ei = s.box_ei();
+    let ei = SliderSpec {
+        log: true,
+        ..spec(
+            "dev.ei",
+            "Develop for EI",
+            help::EI,
+            (6.0, 12800.0, box_ei, 1.0),
+            0,
+            " EI",
+        )
+    };
+    widgets::slider(ui, &ei, &mut s.exposure_index, true);
+    let ev = SliderSpec {
+        signed: true,
+        ..spec(
+            "dev.ev",
+            "Exposure comp.",
+            help::EV,
+            (-3.0, 3.0, 0.0, 1.0 / 3.0),
+            2,
+            " EV",
+        )
+    };
+    widgets::slider(ui, &ev, &mut s.ev_compensation, true);
+
+    widgets::subtitle(ui, "Time", help::TIME);
+    let published = s.development.time_min.is_none();
+    let options = [
+        Segment {
+            label: "Published",
+            selected: published,
+            enabled: true,
+            help: "Follow the time table for this film, developer and EI.",
+        },
+        Segment {
+            label: "Your own",
+            selected: !published,
+            enabled: true,
+            help: "Set the development time yourself.",
+        },
+    ];
+    match widgets::segmented(ui, &options, 2) {
+        Some(0) => s.development.time_min = None,
+        Some(_) if published => s.development.time_min = Some(s.processing().time_min),
+        _ => {}
+    }
+    let recommended = s.recommended_time().map(|t| t.time_min).unwrap_or(7.0);
+    let time = SliderSpec {
+        log: true,
+        ..spec(
+            "dev.time",
+            "Time",
+            help::TIME,
+            (1.0, 120.0, recommended, 0.25),
+            2,
+            " min",
+        )
+    };
+    let mut t = s.processing().time_min;
+    if widgets::slider(ui, &time, &mut t, !published) {
+        s.development.time_min = Some(t);
+    }
+    widgets::slider(
+        ui,
+        &spec(
+            "dev.temp",
+            "Temperature",
+            help::TEMP,
+            (16.0, 28.0, 20.0, 0.5),
+            1,
+            " °C",
+        ),
+        &mut s.development.temperature_c,
+        true,
+    );
+
+    widgets::subtitle(ui, "Agitation", help::AGITATION);
+    let choices = [
+        (
+            AgitationSpec::Continuous,
+            "Continuous",
+            "Rotary or constant inversion: even development, least edge effect.",
+        ),
+        (
+            AgitationSpec::Intermittent { interval_s: 30.0 },
+            "Every 30 s",
+            "The reference scheme for the published times.",
+        ),
+        (
+            AgitationSpec::Intermittent { interval_s: 60.0 },
+            "Every 60 s",
+            "Gentler: slightly more edge effect and compensation.",
+        ),
+        (
+            AgitationSpec::SemiStand { mid_agitations: 1 },
+            "Semi-stand",
+            "One agitation halfway: strong compensation and edge effects.",
+        ),
+        (
+            AgitationSpec::Stand,
+            "Stand",
+            "No agitation after the start: strongest compensation and edges; set a long time.",
+        ),
+    ];
+    let segments: Vec<Segment> = choices
+        .iter()
+        .map(|(a, label, help)| Segment {
+            label,
+            selected: s.development.agitation == *a,
+            enabled: true,
+            help,
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(ui, &segments, 3) {
+        s.development.agitation = choices[i].0;
+    }
+}
+
+/// Grain: size, amount and roughness relative to the film's own grain.
+pub fn grain_section(ui: &mut egui::Ui, s: &mut Style, summary: Option<&ModelSummary>) {
+    let size = SliderSpec {
+        log: true,
+        ..spec(
+            "grain.size",
+            "Size",
+            help::GRAIN_SIZE,
+            (0.5, 3.0, 1.0, 0.01),
+            2,
+            "×",
+        )
+    };
+    widgets::slider(ui, &size, &mut s.grain.size, true);
+    widgets::slider(
+        ui,
+        &spec(
+            "grain.amount",
+            "Amount",
+            help::GRAIN_AMOUNT,
+            (0.0, 3.0, 1.0, 0.01),
+            2,
+            "×",
+        ),
+        &mut s.grain.amount,
+        true,
+    );
+    let mut rough = s.grain.roughness * 100.0;
+    let roughness = SliderSpec {
+        signed: true,
+        ..spec(
+            "grain.roughness",
+            "Roughness",
+            help::GRAIN_ROUGHNESS,
+            (-100.0, 100.0, 0.0, 1.0),
+            0,
+            "",
+        )
+    };
+    if widgets::slider(ui, &roughness, &mut rough, true) {
+        s.grain.roughness = rough / 100.0;
+    }
+    inset(ui, |ui| {
+        ui.horizontal(|ui| {
+            if widgets::text_button(ui, "Film's grain", false, !s.grain.is_film_grain())
+                .on_hover_text(help::FILM_GRAIN)
+                .clicked()
+            {
+                s.grain = GrainSpec::default();
+            }
+            if widgets::text_button(ui, "Randomise", false, true)
+                .on_hover_text(help::RANDOMISE)
+                .clicked()
+            {
+                randomise_grain(s);
+            }
+            if widgets::text_button(ui, "New pattern", false, true)
+                .on_hover_text(help::NEW_PATTERN)
+                .clicked()
+            {
+                s.seed = s.seed.wrapping_add(1);
+            }
+        });
+    });
+    ui.add_space(6.0);
+    if let Some(m) = summary {
+        let adjusted = if s.grain.is_film_grain() {
+            ""
+        } else {
+            " · adjusted from the film"
+        };
+        widgets::note(
+            ui,
+            format!(
+                "Grain at print: {} ({:.0}){adjusted}",
+                m.grain.describe(),
+                m.grain.at_print
+            ),
+            help::GRAIN_READOUT,
+        );
+    }
+    widgets::note(ui, "Press D and click the image to judge grain at 1:1.", "");
+}
+
+/// Print: paper grade and enlarger exposure.
+pub fn print_section(ui: &mut egui::Ui, s: &mut Style) {
+    widgets::slider(
+        ui,
+        &spec(
+            "print.grade",
+            "Paper grade",
+            help::GRADE,
+            (0.0, 5.0, 2.0, 0.5),
+            1,
+            "",
+        ),
+        &mut s.print.grade,
+        true,
+    );
+    let exposure = SliderSpec {
+        signed: true,
+        ..spec(
+            "print.exposure",
+            "Print exposure",
+            help::PRINT_EXPOSURE,
+            (-2.0, 2.0, 0.0, 1.0 / 6.0),
+            2,
+            " stops",
+        )
+    };
+    widgets::slider(ui, &exposure, &mut s.print.exposure_stops, true);
+}
 fn model_panel(ui: &mut egui::Ui, summary: Option<&ModelSummary>) {
     let Some(summary) = summary else {
         ui.colored_label(

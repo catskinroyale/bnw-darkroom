@@ -14,7 +14,10 @@ mod menu;
 mod source;
 mod style_menu;
 mod styles;
+mod theme;
+mod updates;
 mod version;
+mod widgets;
 mod worker;
 mod workflow;
 

@@ -8,6 +8,8 @@ use crate::version;
 
 const APACHE_TEXT: &str = include_str!("../../../LICENSE-APACHE");
 const MIT_TEXT: &str = include_str!("../../../LICENSE-MIT");
+const LIGHTCRAFT_TEXT: &str = include_str!("../assets/LICENSE-LightCraft-MIT");
+const INTER_TEXT: &str = include_str!("../assets/fonts/OFL-Inter.txt");
 const THIRD_PARTY_JSON: &str = include_str!("../assets/third-party-licenses.json");
 const ICON_PNG: &[u8] = include_bytes!("../../../packaging/macos/icon_1024.png");
 
@@ -33,6 +35,8 @@ pub fn components() -> Vec<Component> {
 
 pub struct About {
     pub open: bool,
+    /// Set when the user presses "Check for Updates…"; the app takes it.
+    pub check_requested: bool,
     filter: String,
     components: Vec<Component>,
     icon: Option<egui::TextureHandle>,
@@ -42,6 +46,7 @@ impl Default for About {
     fn default() -> Self {
         Self {
             open: false,
+            check_requested: false,
             filter: String::new(),
             components: components(),
             icon: None,
@@ -108,6 +113,13 @@ impl About {
                         ui.label(format!("Version {}", version::full()))
                             .on_hover_text("Semantic version (MAJOR.MINOR.PATCH) and the git commit of this build.");
                         ui.label(egui::RichText::new("Black-and-white film, developer and darkroom emulation.").weak());
+                        if ui
+                            .small_button("Check for Updates…")
+                            .on_hover_text("Ask GitHub whether a newer version has been released")
+                            .clicked()
+                        {
+                            self.check_requested = true;
+                        }
                     });
                 });
                 ui.label(
@@ -130,6 +142,8 @@ impl About {
                 });
                 licence_text(ui, "apache", "Apache License 2.0 — full text", APACHE_TEXT);
                 licence_text(ui, "mit", "MIT License — full text", MIT_TEXT);
+                licence_text(ui, "lightcraft", "LightCraft (interface design) — MIT License", LIGHTCRAFT_TEXT);
+                licence_text(ui, "inter", "Inter typeface — SIL Open Font License 1.1", INTER_TEXT);
 
                 ui.separator();
                 ui.label(egui::RichText::new("Data and components").strong());
@@ -137,7 +151,9 @@ impl About {
                     ("Raw decoding", "LightCraft lightcraft-raw — MIT OR Apache-2.0"),
                     ("Camera colour matrices", "rawtoaces-data, Academy Software Foundation — Apache-2.0"),
                     ("Development times", "Massive Dev Chart, Digital Truth — not covered by this project's licences"),
-                    ("Interface fonts", "egui default fonts — Ubuntu Font Licence, SIL OFL 1.1"),
+                    ("Interface design", "Adapted from LightCraft, ArtCraft Team and LightCraft contributors — MIT"),
+                    ("Interface font", "Inter, Rasmus Andersson — SIL OFL 1.1"),
+                    ("Fallback fonts", "egui default fonts — Ubuntu Font Licence, SIL OFL 1.1"),
                 ] {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new(format!("{what}:")).weak());
@@ -215,5 +231,7 @@ mod tests {
     fn licence_texts_are_bundled() {
         assert!(APACHE_TEXT.contains("Apache License") && APACHE_TEXT.contains("Version 2.0"));
         assert!(MIT_TEXT.starts_with("MIT License"));
+        assert!(LIGHTCRAFT_TEXT.contains("LightCraft contributors"));
+        assert!(INTER_TEXT.contains("SIL OPEN FONT LICENSE"));
     }
 }

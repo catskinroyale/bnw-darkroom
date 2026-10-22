@@ -18,12 +18,12 @@ see its effect on the rest.
 
 ## Contents
 
-- [Installing](#installing)
+- [Installing](#installing) (and [update notices](#update-notices))
 - [The window](#the-window)
 - [Opening photos](#opening-photos)
 - [Preparing the image](#preparing-the-image)
 - [Choosing a style](#choosing-a-style)
-- [The workflow panel](#the-workflow-panel)
+- [The Develop panel](#the-develop-panel)
 - [Push and pull](#push-and-pull)
 - [Grain](#grain)
 - [Checking detail at 100% and 200%](#checking-detail-at-100-and-200)
@@ -48,6 +48,23 @@ BW Darkroom runs on Apple Silicon Macs.
 To update, quit the app and replace it with the new version from the DMG. Your styles
 and settings are kept.
 
+### Update notices
+
+Once a day, when it starts, BW Darkroom asks GitHub whether a newer version has been
+released. If there is one, an **Update** button appears in the top bar. Click it to see
+what's new, then:
+
+- **Download…** opens the release page in your browser, with the DMG to download.
+- **Later** hides the dialog until next time.
+- **Skip This Version** stops the notice for that version.
+
+**BW Darkroom ▸ Check for Updates…** (or the button in the About window) checks
+straight away. To turn off the daily check, untick **Check for updates automatically** in
+the Software Update window.
+
+The check sends nothing except the request itself, and nothing is downloaded or
+installed without you.
+
 ## The window
 
 | Area | What it's for |
@@ -55,8 +72,18 @@ and settings are kept.
 | **Top bar** | Show or hide panels (**Files**, **Workflow**, **Gallery**), **Open folder…**, **Export…**, and the theme (**Auto**, **Light**, **Dark**). |
 | **Files** (left) | The folder you're working in. |
 | **Image** (centre) | The selected photo rendered with the current style. |
-| **Workflow** (right) | Image adjustments, the style list and the workflow controls. |
+| **Tool strip** (far right) | Icons that choose the panel beside it: **Develop** and **Styles** at the top, **Export** and **About** at the bottom. Click the active icon again to hide the panel. |
+| **Develop** panel (right) | The style picker and the Image, Film, Development, Grain and Print sections. |
+| **Styles** panel (right) | Every style, in groups. |
 | **Gallery** (bottom) | The current photo rendered with every style, to compare them at a glance. |
+
+The Develop panel's sections open and close with a click on their title, and remember how
+you left them. Advanced controls sit in expandable rows inside a section (for example
+**Development details**); click a row to open it.
+
+**Sliders:** drag the track (hold **Shift** for fine control), **double-click** the
+name or the knob to reset it, or **click the value** to type one (Return applies, Esc
+cancels).
 
 Panels can be resized by dragging their edges. **F** hides every panel for a clean view
 of the image and brings them back.
@@ -83,7 +110,7 @@ Nikon High Efficiency (HE/HE★) NEFs aren't supported; use lossless compressed 
 
 ## Preparing the image
 
-The **Image** section at the top of the right panel adjusts the photo *before* it
+The **Image** section at the top of the Develop panel adjusts the photo *before* it
 reaches the film, like choices made in the camera. These settings belong to the photo,
 not to the style. They're saved next to it and come back when you reopen it.
 
@@ -92,19 +119,21 @@ not to the style. They're saved next to it and come back when you reopen it.
 - **Contrast** changes the scene's contrast around mid-grey, like a lighting ratio.
 - **White balance** (raw only) sets which light counts as neutral. Film turns colours
   into greys, so this changes which tones come out lighter or darker, much like a
-  coloured filter on the lens. Choose a preset, or set **Temp** and **Tint** in Detailed
-  view.
-- **Highlights** (raw only, Detailed view): **Reconstruct** recovers detail where the sensor clipped;
-  **Clip** renders clipped areas as plain white.
-- **Rotate left / Rotate right**, and **Reset** to return to the camera's settings.
+  coloured filter on the lens. Choose a preset, or set your own **Temperature** and
+  **Tint** under **Temperature & highlights**.
+- **Highlights** (raw only, under **Temperature & highlights**): **Reconstruct** recovers
+  detail where the sensor clipped; **Clip** renders clipped areas as plain white.
+- **Rotate ← / Rotate →**, and **Reset** to return to the camera's settings.
 
 **Show original (O)** shows the photo before black-and-white conversion.
 
 ## Choosing a style
 
-The **Styles** list holds the built-in styles and your own (marked *mine*). Click one to
-apply it. The **Gallery** shows the current photo in every style; click a tile to apply
-that style.
+Choose a style from the **Style** row at the top of the Develop panel, or open the
+**Styles** panel (its icon in the tool strip, or the grid button beside the Style row). It
+lists every style in three groups: **Films & processes**, **Photographers** and **My
+styles**. Click one to apply it. The **Gallery** shows the current photo in every style;
+click a tile to apply that style.
 
 Built-in styles cover:
 
@@ -117,33 +146,35 @@ Built-in styles cover:
 
 ### Photographer presets
 
-The **Photographers** tab in the Workflow section offers looks inspired by Don McCullin,
-Ansel Adams, Bill Brandt, Josef Koudelka and Edward Weston. Each one explains what is
-documented about the photographer's working methods and what is interpretation.
-**Apply** uses its film, developer, processing and print recipe, and sets scene contrast
-where the look calls for it.
+The **Photographers** group offers looks inspired by Don McCullin, Ansel Adams, Bill
+Brandt, Josef Koudelka and Edward Weston. Hover one to see the look and what is
+documented about the photographer's working methods versus what is interpretation.
+Clicking one uses its film, developer, processing and print recipe, and sets scene
+contrast where the look calls for it.
 
-## The workflow panel
+## The Develop panel
 
-The Workflow section has three views:
+Below the style picker, the Develop panel has these sections:
 
-- **Simple:** quick choices as buttons: film, developer and dilution, push/pull and grain.
-- **Detailed:** every control, including exposure compensation, development time,
-  temperature, agitation, format, enlargement, paper grade and print exposure. It also
-  shows the negative's characteristic curve.
-- **Photographers:** the presets described above.
+| Section | Controls | Expandable rows |
+|---|---|---|
+| **Image** | Auto, rotate, reset; exposure, contrast; white balance presets | **Temperature & highlights** |
+| **Film** | Film stock, format, enlargement | |
+| **Development** | Developer, dilution, push/pull, and a readout of the time | **Development details** (EI, exposure compensation, time, temperature, agitation) and **Characteristic curve** |
+| **Grain** | Size, amount, roughness; Film's grain, Randomise, New pattern | |
+| **Print** | Paper grade, print exposure | |
 
 Changes show in the image straight away. They change a *draft* of the selected style; see
 [Saving and managing styles](#saving-and-managing-styles) to keep them.
 
 **Development time** follows the published time for the film, developer, dilution and EI
 (from the Massive Dev Chart, whole stops only). The readout says whether the time is
-**published**, **interpolated** or **estimated**. In Detailed view, untick **published** to
-set your own time. Longer development raises contrast and grain.
+**published**, **interpolated** or **estimated**. Under **Development details**, choose
+**Your own** to set the time yourself. Longer development raises contrast and grain.
 
-**Agitation** (Detailed view): every 30 s or 60 s, semi-stand or stand. Less agitation
-gives more edge sharpness and holds back the highlights (compensation). Stand needs a long
-time.
+**Agitation** (under **Development details**): continuous, every 30 s or 60 s,
+semi-stand or stand. Less agitation gives more edge sharpness and holds back the
+highlights (compensation). Stand needs a long time.
 
 ## Push and pull
 
@@ -159,7 +190,7 @@ The effect depends on the published times. For example, Tri-X in D-76 at Push 1 
 same time as box speed, because Kodak treats one stop as within the film's latitude.
 
 For the classic **underexposed push** (empty, blocked shadows), push and also lower
-**Exposure comp.** in Detailed view.
+**Exposure comp.** under **Development details**.
 
 The print keeps the same black point whatever the development, as a darkroom printer
 does when working to "minimum time for maximum black". So development changes show as
@@ -168,13 +199,14 @@ they would under a real enlarger.
 ## Grain
 
 Grain comes from the film and developer, and shows more the more the negative is
-enlarged.
+enlarged. In the **Film** section:
 
 - **Format** sets the film size: 35 mm shows the most grain at a given print size; 4×5
   and 8×10 almost none.
 - **Enlarge** uses only the centre of the frame, which means enlarging the negative more.
-- The readout, **Grain at print**, rates the result from *very fine* to *very coarse*,
-  with Kodak's RMS granularity figure.
+
+In the **Grain** section, the readout **Grain at print** rates the result from *very
+fine* to *very coarse*, with Kodak's RMS granularity figure.
 
 You can also adjust the grain beyond what the film gives:
 
@@ -200,12 +232,15 @@ Detail window displays.
 - **200%** magnifies two times, for judging grain structure.
 
 The Detail window updates first whenever you change a setting, so you can fine-tune
-development and grain while watching it. A small spinner shows while it catches up. Drag
-the window wherever it's most useful; click the image again to move the outlined area.
+development and grain while watching it. A small spinner shows while it catches up.
+
+To move the area you're inspecting, **drag inside the Detail window**, as if moving the
+photo under a loupe, or click the main image. Drag the window by its title bar to put it
+wherever it's most useful.
 
 ## Printing controls
 
-In Detailed view:
+In the **Print** section:
 
 - **Paper grade** (0–5) sets print contrast. Grade 2 is normal; higher is harder.
 - **Print exposure** makes the whole print darker (more exposure) or lighter (less), in
@@ -217,26 +252,27 @@ print.
 
 ## Saving and managing styles
 
-When you change a style, the panel offers:
+When you change a style, its name shows *(edited)* and the buttons under **Develop**
+offer:
 
-- **Save changes:** update your own style (built-in styles are read-only).
-- **Save as new style:** keep the changes as a new style of your own.
+- **Save:** update your own style (built-in styles are read-only).
+- **Save as…:** keep the changes as a new style of your own.
 - **Revert:** discard the changes.
 
-Each row in the Styles list has a **…** menu (the same menu opens when you right-click a
-Gallery tile):
+Each row in the Styles panel has a **…** menu when you hover it, and the same menu opens
+when you right-click a row or a Gallery tile:
 
 | Item | What it does |
 |---|---|
-| **Edit…** | Opens every setting in an editor window, with a live preview. |
+| **Edit…** | Applies the style and opens every section of the Develop panel. |
 | **Duplicate** | Makes an editable copy. |
 | **Rename…** | Renames one of your styles. |
 | **Export…** | Saves the style as a `.json` file to share or back up. |
 | **Move up / Move down** | Reorders your own styles, below the built-ins. |
 | **Delete…** | Removes one of your styles, after asking. |
 
-**Import…** at the top of the list adds styles from exported `.json` files. Styles with a
-clashing name are renamed.
+**Import…** at the top of the Styles panel adds styles from exported `.json` files.
+Styles with a clashing name are renamed.
 
 ## Exporting
 
@@ -282,7 +318,7 @@ field.
 | **O** | Show the original |
 | **D** | Detail window on or off |
 | **B** | Show or hide the file browser |
-| **W** | Show or hide the workflow panel |
+| **W** | Show or hide the Develop / Styles panel |
 | **G** | Show or hide the gallery |
 | **F** | Focus: hide or show all panels |
 | **⌘E** | Export |

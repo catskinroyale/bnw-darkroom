@@ -1,4 +1,4 @@
-//! The Image panel: per-image adjustments made before black-and-white development.
+//! The Image section: per-image adjustments made before black-and-white development.
 //! Scene-referred only (exposure, white balance, highlight handling, rotation): tone
 //! is left to the film, developer and paper.
 
@@ -6,6 +6,7 @@ use bw_raw::{Highlights, RawAdjust, WhiteBalance};
 use eframe::egui;
 
 use crate::source::Source;
+use crate::widgets::{self, Icon, Segment, SliderSpec, inset};
 
 mod help {
     pub const EXPOSURE: &str = "Brightens or darkens the scene before it reaches the film, in stops.\nUse it to correct the camera's exposure; push and pull are set in the workflow.";
@@ -42,177 +43,198 @@ fn wb_help(wb: &WhiteBalance) -> &'static str {
     }
 }
 
-fn chip(ui: &mut egui::Ui, selected: bool, label: &str, help: &str) -> bool {
-    ui.add(egui::Button::selectable(selected, label))
-        .on_hover_text(help)
-        .clicked()
-}
-
-/// Draw the panel. Returns true when `adjust` changed.
-pub fn show(
-    ui: &mut egui::Ui,
-    adjust: &mut RawAdjust,
-    source: Option<&Source>,
-    detailed: bool,
-) -> bool {
-    let before = *adjust;
-    let Some(source) = source else {
-        ui.label(egui::RichText::new("No image open").weak());
-        return false;
-    };
-
+/// The capture line for the panel's top (camera and exposure, or "Rendered image") and
+/// its hover text, plus any warning about the camera's colour data.
+pub fn capture_summary(source: &Source) -> (String, String, Option<&'static str>) {
     match source.capture() {
         Some(info) => {
             let mut line = info.summary();
             if info.monochrome {
                 line.push_str(" · monochrome sensor");
             }
-            ui.label(egui::RichText::new(line).small())
-                .on_hover_text(format!("Raw file, {} × {} px", info.width, info.height));
+            let mut hover = format!("Raw file, {} × {} px", info.width, info.height);
             if info.spectral_matrix {
-                ui.label(egui::RichText::new("Colour from measured camera spectral sensitivities").small().weak())
-                    .on_hover_text("Camera matrices fitted to this camera's measured spectral sensitivities (rawtoaces-data, Academy Software Foundation).");
-            }
-            if info.matrix_is_fallback {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    "No colour data for this camera: colours, and so their grey values, are approximate.",
+                hover.push_str(
+                    "\nColour from this camera's measured spectral sensitivities \
+                     (rawtoaces-data, Academy Software Foundation).",
                 );
             }
+            let warning = info.matrix_is_fallback.then_some(
+                "No colour data for this camera: colours, and so their grey values, are approximate.",
+            );
+            (line, hover, warning)
         }
-        None => {
-            ui.label(egui::RichText::new("Rendered image (TIFF/JPEG/PNG)").small())
-                .on_hover_text(help::RENDERED);
-        }
+        None => (
+            "Rendered image (TIFF/JPEG/PNG)".into(),
+            help::RENDERED.into(),
+            None,
+        ),
     }
+}
 
-    // Exposure
-    ui.horizontal(|ui| {
-        ui.label("Exposure").on_hover_text(help::EXPOSURE);
-        ui.add(
-            egui::Slider::new(&mut adjust.exposure_ev, -4.0..=4.0)
-                .step_by(1.0 / 6.0)
-                .suffix(" EV"),
-        )
-        .on_hover_text(help::EXPOSURE);
-        if ui
-            .small_button("Auto")
-            .on_hover_text(help::AUTO_EXPOSURE)
-            .clicked()
-        {
-            adjust.exposure_ev = auto_exposure(source, adjust);
-        }
-    });
+const EXPOSURE: SliderSpec = SliderSpec {
+    id: "image.exposure",
+    label: "Exposure",
+    help: help::EXPOSURE,
+    min: -4.0,
+    max: 4.0,
+    default: 0.0,
+    step: 0.05,
+    decimals: 2,
+    suffix: " EV",
+    signed: true,
+    log: false,
+};
 
-    ui.horizontal(|ui| {
-        ui.label("Contrast").on_hover_text(help::CONTRAST);
-        ui.add(egui::Slider::new(&mut adjust.contrast, -100.0..=100.0).step_by(5.0))
-            .on_hover_text(help::CONTRAST);
+const CONTRAST: SliderSpec = SliderSpec {
+    id: "image.contrast",
+    label: "Contrast",
+    help: help::CONTRAST,
+    min: -100.0,
+    max: 100.0,
+    default: 0.0,
+    step: 1.0,
+    decimals: 0,
+    suffix: "",
+    signed: true,
+    log: false,
+};
+
+const TEMP: SliderSpec = SliderSpec {
+    id: "image.temp",
+    label: "Temperature",
+    help: help::TEMP,
+    min: 2000.0,
+    max: 12000.0,
+    default: 5500.0,
+    step: 10.0,
+    decimals: 0,
+    suffix: " K",
+    signed: false,
+    log: true,
+};
+
+const TINT: SliderSpec = SliderSpec {
+    id: "image.tint",
+    label: "Tint",
+    help: help::TINT,
+    min: -100.0,
+    max: 100.0,
+    default: 0.0,
+    step: 1.0,
+    decimals: 0,
+    suffix: "",
+    signed: true,
+    log: false,
+};
+
+/// The Image section's content. Returns true when `adjust` changed.
+pub fn show(ui: &mut egui::Ui, adjust: &mut RawAdjust, source: Option<&Source>) -> bool {
+    let before = *adjust;
+    let Some(source) = source else {
+        widgets::note(ui, "No image open", "");
+        return false;
+    };
+
+    inset(ui, |ui| {
+        ui.horizontal(|ui| {
+            if widgets::text_button(ui, "Auto", false, true)
+                .on_hover_text(help::AUTO_EXPOSURE)
+                .clicked()
+            {
+                adjust.exposure_ev = auto_exposure(source, adjust);
+            }
+            if widgets::text_button(ui, "Rotate ←", false, true)
+                .on_hover_text(help::ROTATE_LEFT)
+                .clicked()
+            {
+                adjust.rotation = (adjust.rotation + 3) % 4;
+            }
+            if widgets::text_button(ui, "Rotate →", false, true)
+                .on_hover_text(help::ROTATE_RIGHT)
+                .clicked()
+            {
+                adjust.rotation = (adjust.rotation + 1) % 4;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::text_button(ui, "Reset", false, *adjust != RawAdjust::default())
+                    .on_hover_text(help::RESET)
+                    .clicked()
+                {
+                    *adjust = RawAdjust::default();
+                }
+            });
+        });
     });
+    ui.add_space(4.0);
+    widgets::slider(ui, &EXPOSURE, &mut adjust.exposure_ev, true);
+    widgets::slider(ui, &CONTRAST, &mut adjust.contrast, true);
 
     let raw = source.raw();
     let colour = raw.is_some_and(|p| !p.info.monochrome);
-
-    // White balance (colour raw files only)
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("White balance").strong())
-        .on_hover_text(help::WB);
-    if let (true, Some(photo)) = (colour, raw) {
-        ui.horizontal_wrapped(|ui| {
-            for wb in WhiteBalance::PRESETS {
-                if chip(ui, adjust.white_balance == wb, wb.label(), wb_help(&wb)) {
-                    adjust.white_balance = wb;
-                }
-            }
-        });
-        if detailed || matches!(adjust.white_balance, WhiteBalance::Custom { .. }) {
-            let (shown_temp, shown_tint) = photo.temp_tint_for(adjust.white_balance);
-            let (mut temp, mut tint) = (shown_temp, shown_tint);
-            let t = ui
-                .add(
-                    egui::Slider::new(&mut temp, 2000.0..=12000.0)
-                        .logarithmic(true)
-                        .fixed_decimals(0)
-                        .suffix(" K")
-                        .text("Temp"),
-                )
-                .on_hover_text(help::TEMP);
-            let n = ui
-                .add(
-                    egui::Slider::new(&mut tint, -100.0..=100.0)
-                        .fixed_decimals(0)
-                        .text("Tint"),
-                )
-                .on_hover_text(help::TINT);
-            // Only a real move counts: the logarithmic slider can nudge the value by a
-            // fraction just by being drawn, which must not turn "As shot" into Custom.
-            let moved = (temp - shown_temp).abs() > 0.5 || (tint - shown_tint).abs() > 0.5;
-            if (t.changed() || n.changed()) && moved {
-                adjust.white_balance = WhiteBalance::Custom {
-                    temp: temp.round(),
-                    tint: tint.round(),
-                };
-            }
-        }
-    } else {
+    widgets::subtitle(ui, "White balance", help::WB);
+    let Some(photo) = raw.filter(|_| colour) else {
         let why = if raw.is_some() {
             "Monochrome sensor: there is no colour to balance."
         } else {
             help::RENDERED
         };
-        ui.label(egui::RichText::new(why).small().weak());
+        widgets::note(ui, why, "");
+        return *adjust != before;
+    };
+    let presets: Vec<Segment> = WhiteBalance::PRESETS
+        .iter()
+        .map(|wb| Segment {
+            label: wb.label(),
+            selected: adjust.white_balance == *wb,
+            enabled: true,
+            help: wb_help(wb),
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(ui, &presets, 3) {
+        adjust.white_balance = WhiteBalance::PRESETS[i];
     }
-
-    // Highlights (colour raw, detailed view)
-    if colour && detailed {
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Highlights").strong())
-                .on_hover_text(help::HIGHLIGHTS);
-            if chip(
-                ui,
-                adjust.highlights == Highlights::Reconstruct,
-                "Reconstruct",
-                help::RECONSTRUCT,
-            ) {
-                adjust.highlights = Highlights::Reconstruct;
+    widgets::flyout(
+        ui,
+        "image.wb-detail",
+        "Temperature & highlights",
+        "Set your own colour temperature and tint, and how clipped highlights are handled",
+        Icon::Thermometer,
+        |ui| {
+            let (shown_temp, shown_tint) = photo.temp_tint_for(adjust.white_balance);
+            let (mut temp, mut tint) = (shown_temp, shown_tint);
+            let t = widgets::slider(ui, &TEMP, &mut temp, true);
+            let n = widgets::slider(ui, &TINT, &mut tint, true);
+            // Only a real move counts: drawing must never turn "As shot" into Custom.
+            let moved = (temp - shown_temp).abs() > 0.5 || (tint - shown_tint).abs() > 0.5;
+            if (t || n) && moved {
+                adjust.white_balance = WhiteBalance::Custom {
+                    temp: temp.round(),
+                    tint: tint.round(),
+                };
             }
-            if chip(
-                ui,
-                adjust.highlights == Highlights::Clip,
-                "Clip",
-                help::CLIP,
-            ) {
-                adjust.highlights = Highlights::Clip;
+            widgets::subtitle(ui, "Highlights", help::HIGHLIGHTS);
+            let options = [
+                Segment {
+                    label: "Reconstruct",
+                    selected: adjust.highlights == Highlights::Reconstruct,
+                    enabled: true,
+                    help: help::RECONSTRUCT,
+                },
+                Segment {
+                    label: "Clip",
+                    selected: adjust.highlights == Highlights::Clip,
+                    enabled: true,
+                    help: help::CLIP,
+                },
+            ];
+            match widgets::segmented(ui, &options, 2) {
+                Some(0) => adjust.highlights = Highlights::Reconstruct,
+                Some(_) => adjust.highlights = Highlights::Clip,
+                None => {}
             }
-        });
-    }
-
-    // Rotation and reset
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        if ui
-            .button("Rotate left")
-            .on_hover_text(help::ROTATE_LEFT)
-            .clicked()
-        {
-            adjust.rotation = (adjust.rotation + 3) % 4;
-        }
-        if ui
-            .button("Rotate right")
-            .on_hover_text(help::ROTATE_RIGHT)
-            .clicked()
-        {
-            adjust.rotation = (adjust.rotation + 1) % 4;
-        }
-        if ui
-            .add_enabled(*adjust != RawAdjust::default(), egui::Button::new("Reset"))
-            .on_hover_text(help::RESET)
-            .clicked()
-        {
-            *adjust = RawAdjust::default();
-        }
-    });
+        },
+    );
 
     *adjust != before
 }

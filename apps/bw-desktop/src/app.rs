@@ -1,7 +1,9 @@
 //! Application state and UI.
 //!
-//! Layout: folder browser (left), preview (centre), style editor (right), style
-//! gallery showing the current image in every style (bottom).
+//! Layout: folder browser (left), preview (centre), the Develop or Styles panel (right)
+//! chosen from an icon strip at the far right, and a style gallery showing the current
+//! image in every style (bottom). The panel design follows LightCraft's (see `theme` and
+//! `widgets`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,16 +18,169 @@ use crate::export::{Conflict, ExportSettings, Format, NameContext, TOKENS, resol
 use crate::source::Source;
 use crate::style_menu::{self, StyleAction};
 use crate::styles::StyleStore;
+use crate::theme::Tokens;
+use crate::updates::{self, CheckResult, Release};
+use crate::widgets::{self, Icon, inset};
 use crate::worker::{self, Job, Msg};
 use crate::workflow;
 use bw_raw::RawAdjust;
 
 const KEY_FOLDER: &str = "folder";
-const KEY_VIEW: &str = "workflow_view";
+const KEY_MODULE: &str = "right_module";
 const KEY_THEME: &str = "theme";
 const KEY_BROWSER_THUMBS: &str = "browser_thumbs";
 const KEY_BROWSER_BITMAPS: &str = "browser_bitmaps";
 const KEY_BROWSER_JPEGS: &str = "browser_jpegs";
+const KEY_UPDATE_AUTO: &str = "update_auto";
+const KEY_UPDATE_LAST: &str = "update_last_check";
+const KEY_UPDATE_SKIPPED: &str = "update_skipped";
+
+/// Release notes from the changelog (Markdown): headings in bold, bullets as "•", and
+/// emphasis and code markers dropped.
+fn release_notes(ui: &mut egui::Ui, notes: &str) {
+    for line in notes.lines() {
+        let plain = line.replace("**", "").replace('`', "");
+        let trimmed = plain.trim_start();
+        if trimmed.is_empty() {
+            ui.add_space(4.0);
+        } else if let Some(heading) = trimmed.strip_prefix('#') {
+            ui.label(egui::RichText::new(heading.trim_start_matches('#').trim()).strong());
+        } else if let Some(item) = trimmed.strip_prefix("- ") {
+            let indent = (plain.len() - trimmed.len()) as f32 * 4.0;
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(indent);
+                ui.label(format!("•  {item}"));
+            });
+        } else {
+            ui.label(trimmed);
+        }
+    }
+}
+
+/// A scripted click or drag for screenshot tests: move to the start, press, (for a drag)
+/// move to the end in steps, release, one event per frame.
+struct ScriptedPointer {
+    at_s: f64,
+    start: Pos2,
+    end: Option<Pos2>,
+    stage: u8,
+}
+
+impl ScriptedPointer {
+    const DRAG_STEPS: u8 = 12;
+
+    /// "t:x,y" (click) or "t:x,y>x2,y2" (drag).
+    fn parse(spec: &str) -> Option<Self> {
+        let point = |s: &str| {
+            let (x, y) = s.split_once(',')?;
+            Some(egui::pos2(x.trim().parse().ok()?, y.trim().parse().ok()?))
+        };
+        let (t, rest) = spec.split_once(':')?;
+        let (start, end) = match rest.split_once('>') {
+            Some((a, b)) => (point(a)?, Some(point(b)?)),
+            None => (point(rest)?, None),
+        };
+        Some(Self {
+            at_s: t.trim().parse().ok()?,
+            start,
+            end,
+            stage: 0,
+        })
+    }
+
+    fn last_stage(&self) -> u8 {
+        if self.end.is_some() {
+            2 + Self::DRAG_STEPS
+        } else {
+            2
+        }
+    }
+
+    fn done(&self) -> bool {
+        self.stage > self.last_stage()
+    }
+
+    fn next_event(&mut self) -> egui::Event {
+        let stage = self.stage;
+        self.stage += 1;
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let end = self.end.unwrap_or(self.start);
+        match stage {
+            0 => egui::Event::PointerMoved(self.start),
+            1 => button(self.start, true),
+            s if s == self.last_stage() => button(end, false),
+            s => {
+                let t = f32::from(s - 1) / f32::from(Self::DRAG_STEPS);
+                egui::Event::PointerMoved(self.start + (end - self.start) * t)
+            }
+        }
+    }
+}
+
+/// The panel the tool strip shows on the right.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Module {
+    Develop,
+    Styles,
+}
+
+impl Module {
+    fn key(self) -> &'static str {
+        match self {
+            Module::Develop => "develop",
+            Module::Styles => "styles",
+        }
+    }
+
+    fn from_key(key: &str) -> Module {
+        if key == "styles" {
+            Module::Styles
+        } else {
+            Module::Develop
+        }
+    }
+}
+
+/// Which group a style is listed under.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StyleGroup {
+    Films,
+    Photographers,
+    Mine,
+}
+
+impl StyleGroup {
+    const ALL: [(StyleGroup, &'static str, &'static str); 3] = [
+        (StyleGroup::Films, "styles.films", "Films & processes"),
+        (
+            StyleGroup::Photographers,
+            "styles.photographers",
+            "Photographers",
+        ),
+        (StyleGroup::Mine, "styles.mine", "My styles"),
+    ];
+
+    fn of(entry: &crate::styles::StyleEntry) -> StyleGroup {
+        if !entry.builtin {
+            StyleGroup::Mine
+        } else if entry.style.name.starts_with("Inspired by") {
+            StyleGroup::Photographers
+        } else {
+            StyleGroup::Films
+        }
+    }
+}
+
+/// What the update dialog is showing.
+enum UpdateDialog {
+    Checking,
+    Result(CheckResult),
+}
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
@@ -74,8 +229,10 @@ pub struct App {
     summary: Option<ModelSummary>,
     /// Display label of the draft's developer, for export file names.
     developer_label: String,
-    /// Workflow panel shows every control rather than the simple chips.
-    view: workflow::View,
+    /// Which panel the tool strip shows on the right.
+    module: Module,
+    /// Open every Develop section on the next frame ("Edit…" from a style's menu).
+    open_all_sections: bool,
     /// File browser shows thumbnails in its rows (otherwise a compact list).
     browser_thumbs: bool,
     /// Which non-raw files the browser lists (raw files always are).
@@ -105,6 +262,10 @@ pub struct App {
     /// the texture is drawn at the zoom it was rendered for, never the newly chosen one.
     detail_requested_zoom: u8,
     detail_texture_zoom: u8,
+    /// Centre of the latest detail request, and of the texture on screen: while a drag
+    /// waits for a new render, the texture slides by the difference.
+    detail_requested_centre: [f32; 2],
+    detail_texture_centre: [f32; 2],
     /// Generation of the detail texture on screen; behind `detail_generation` while a
     /// newer render is on its way.
     detail_shown_generation: u64,
@@ -126,8 +287,6 @@ pub struct App {
     delete_dialog: Option<usize>,
     /// Open "…" menu: style index and the screen position to show it at.
     style_popup: Option<(usize, Pos2)>,
-    /// The style editor window is open (it edits the current style, with live preview).
-    edit_open: bool,
     about: crate::about::About,
     theme: egui::ThemePreference,
     #[cfg(target_os = "macos")]
@@ -139,7 +298,19 @@ pub struct App {
     /// Screenshot runs: whether `BW_DARKROOM_SCREENSHOT_THEN_PUSH` has been applied.
     screenshot_then_applied: bool,
     /// Screenshot runs: clicks still to inject, as (seconds after start, x, y, stage).
-    screenshot_clicks: Vec<(f64, f32, f32, u8)>,
+    screenshot_clicks: Vec<ScriptedPointer>,
+
+    /// Check GitHub for a newer release once a day.
+    update_auto: bool,
+    /// When the last check succeeded, in seconds since the Unix epoch.
+    update_last_check: u64,
+    /// A check in flight.
+    update_rx: Option<Receiver<CheckResult>>,
+    /// A newer release, once a check has found one.
+    update_available: Option<Release>,
+    /// A version the user chose to skip: the top-bar notice stays hidden for it.
+    update_skipped: Option<String>,
+    update_dialog: Option<UpdateDialog>,
 }
 
 impl App {
@@ -165,7 +336,7 @@ impl App {
             .or_else(dirs::picture_dir)
             .or_else(dirs::home_dir)
             .unwrap_or_else(|| PathBuf::from("/"));
-        let view = workflow::View::from_key(get(KEY_VIEW).as_deref().unwrap_or(""));
+        let module = Module::from_key(get(KEY_MODULE).as_deref().unwrap_or(""));
         let export = get(KEY_EXPORT)
             .and_then(|s| serde_json::from_str::<ExportSettings>(&s).ok())
             .unwrap_or_else(|| ExportSettings {
@@ -202,8 +373,17 @@ impl App {
             summary: draft.model_summary().ok(),
             developer_label: bw_profiles::developer_label(&draft.developer),
             draft,
-            view,
+            module,
+            open_all_sections: false,
             browser_thumbs: get(KEY_BROWSER_THUMBS).is_some_and(|v| v == "1"),
+            update_auto: get(KEY_UPDATE_AUTO).is_none_or(|v| v != "0"),
+            update_last_check: get(KEY_UPDATE_LAST)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            update_rx: None,
+            update_available: None,
+            update_skipped: get(KEY_UPDATE_SKIPPED).filter(|v| !v.is_empty()),
+            update_dialog: None,
             browser_filter: browser::Filter {
                 bitmaps: get(KEY_BROWSER_BITMAPS).is_some_and(|v| v == "1"),
                 jpegs: get(KEY_BROWSER_JPEGS).is_some_and(|v| v == "1"),
@@ -211,7 +391,6 @@ impl App {
             presets: bw_profiles::photographer_presets(),
             rename_dialog: None,
             delete_dialog: None,
-            edit_open: false,
             style_popup: None,
             preview_edge: 1600,
             preview_generation: 0,
@@ -229,6 +408,8 @@ impl App {
             detail_generation: 0,
             detail_requested_zoom: 1,
             detail_texture_zoom: 1,
+            detail_requested_centre: [0.5, 0.5],
+            detail_texture_centre: [0.5, 0.5],
             detail_shown_generation: 0,
             detail: None,
             tiles_generation: 0,
@@ -245,19 +426,12 @@ impl App {
             #[cfg(target_os = "macos")]
             menu: crate::menu::AppMenu::install(&cc.egui_ctx),
             screenshot_then_applied: false,
-            // `BW_DARKROOM_SCREENSHOT_CLICKS=t:x,y;t:x,y` clicks at window points (x, y)
-            // t seconds after start, through egui's own input: real interaction in tests.
+            // `BW_DARKROOM_SCREENSHOT_CLICKS=t:x,y;t:x,y>x2,y2` clicks at window points
+            // (x, y), or drags from (x, y) to (x2, y2), t seconds after start, through
+            // egui's own input: real interaction in tests.
             screenshot_clicks: std::env::var("BW_DARKROOM_SCREENSHOT_CLICKS")
                 .ok()
-                .map(|v| {
-                    v.split(';')
-                        .filter_map(|c| {
-                            let (t, xy) = c.split_once(':')?;
-                            let (x, y) = xy.split_once(',')?;
-                            Some((t.parse().ok()?, x.parse().ok()?, y.parse().ok()?, 0))
-                        })
-                        .collect()
-                })
+                .map(|v| v.split(';').filter_map(ScriptedPointer::parse).collect())
                 .unwrap_or_default(),
             screenshot: std::env::var_os("BW_DARKROOM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
@@ -266,10 +440,18 @@ impl App {
             // Test runs can start from default panel sizes, ignoring saved layout.
             cc.egui_ctx.memory_mut(|m| *m = egui::Memory::default());
         }
+        crate::theme::install(&cc.egui_ctx);
         cc.egui_ctx.set_theme(app.theme);
         app.open_folder(folder);
         if let Some(image) = start_image {
             app.select_image(image);
+        }
+        // Test runs never touch the network.
+        if app.update_auto
+            && app.screenshot.is_none()
+            && updates::now_s().saturating_sub(app.update_last_check) >= updates::CHECK_INTERVAL_S
+        {
+            app.update_rx = Some(updates::spawn_check(&cc.egui_ctx));
         }
         app
     }
@@ -381,6 +563,7 @@ impl App {
         }
         self.detail_generation += 1;
         self.detail_requested_zoom = self.detail_zoom;
+        self.detail_requested_centre = self.detail_centre;
         let _ = self.jobs.send(Job::Detail {
             generation: self.detail_generation,
             style: self.draft.clone(),
@@ -485,7 +668,9 @@ impl App {
         match action {
             StyleAction::Edit(i) => {
                 self.select_style(i);
-                self.edit_open = true;
+                self.module = Module::Develop;
+                self.show_styles = true;
+                self.open_all_sections = true;
             }
             StyleAction::Duplicate(i) => {
                 let j = self.store.duplicate(i);
@@ -686,67 +871,132 @@ impl App {
                 self.delete_dialog = None;
             }
         }
+    }
 
-        if self.edit_open {
-            let mut open = true;
-            let builtin = self.store.entries[self.current].builtin;
-            let modified = self.is_modified();
-            let before = self.draft.clone();
-            let mut save = false;
-            let mut save_new = false;
-            let mut revert = false;
-            egui::Window::new(format!(
-                "Edit style · {}",
-                self.store.entries[self.current].style.name
-            ))
-            .id(egui::Id::unique("style-editor"))
+    /// A check the user asked for: show its progress and result in the update dialog.
+    fn check_for_updates(&mut self, ctx: &egui::Context) {
+        self.update_dialog = Some(UpdateDialog::Checking);
+        if self.update_rx.is_none() {
+            self.update_rx = Some(updates::spawn_check(ctx));
+        }
+    }
+
+    fn poll_update_check(&mut self) {
+        let Some(result) = self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+            return;
+        };
+        self.update_rx = None;
+        // A failed check is retried at the next start rather than a day later.
+        if !matches!(result, CheckResult::Failed(_)) {
+            self.update_last_check = updates::now_s();
+        }
+        if let CheckResult::Available(release) = &result {
+            self.update_available = Some(release.clone());
+        }
+        if matches!(self.update_dialog, Some(UpdateDialog::Checking)) {
+            self.update_dialog = Some(UpdateDialog::Result(result));
+        }
+    }
+
+    /// The Software Update window: progress, result, release notes and the setting.
+    fn update_window(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &self.update_dialog else {
+            return;
+        };
+        let current = crate::version::VERSION;
+        let mut open = true;
+        let mut close = false;
+        let mut skip = None;
+        let mut download = None;
+        egui::Window::new("Software Update")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_pos([ctx.content_rect().center().x - 200.0, 80.0])
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.set_width(400.0);
-                if builtin {
-                    ui.label(
-                        egui::RichText::new("Built-in style: save your changes as a new style.")
-                            .small()
-                            .weak(),
-                    );
+                ui.set_width(420.0);
+                match dialog {
+                    UpdateDialog::Checking => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Checking for updates…");
+                        });
+                    }
+                    UpdateDialog::Result(CheckResult::UpToDate) => {
+                        ui.label(egui::RichText::new("You're up to date").strong());
+                        ui.label(format!("BW Darkroom {current} is the latest version."));
+                    }
+                    UpdateDialog::Result(CheckResult::Failed(error)) => {
+                        ui.label(egui::RichText::new("Couldn't check for updates").strong());
+                        ui.label(format!("{error}. Try again later."));
+                    }
+                    UpdateDialog::Result(CheckResult::Available(release)) => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "BW Darkroom {} is available",
+                                release.version
+                            ))
+                            .heading(),
+                        );
+                        ui.label(format!(
+                            "You have {current}. Download the new version, quit BW Darkroom and \
+                             replace it in Applications; your styles and settings are kept."
+                        ));
+                        if !release.notes.is_empty() {
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("What's new").strong());
+                            egui::ScrollArea::vertical()
+                                .max_height(220.0)
+                                .show(ui, |ui| {
+                                    release_notes(ui, &release.notes);
+                                });
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button("Download…")
+                                .on_hover_text(
+                                    "Open the release page, with the installer, in your browser",
+                                )
+                                .clicked()
+                            {
+                                download = Some(release.url.clone());
+                            }
+                            if ui.button("Later").clicked() {
+                                close = true;
+                            }
+                            if ui
+                                .button("Skip This Version")
+                                .on_hover_text("Stop showing the update notice for this version")
+                                .clicked()
+                            {
+                                skip = Some(release.version.clone());
+                            }
+                        });
+                    }
                 }
-                egui::ScrollArea::vertical()
-                    .max_height(560.0)
-                    .show(ui, |ui| {
-                        workflow::detailed(ui, &mut self.draft, self.summary.as_ref());
-                    });
                 ui.separator();
-                ui.horizontal(|ui| {
-                    save = ui
-                        .add_enabled(!builtin && modified, egui::Button::new("Save changes"))
-                        .on_disabled_hover_text(if builtin {
-                            "Built-in styles are read-only"
-                        } else {
-                            "No changes"
-                        })
-                        .clicked();
-                    save_new = ui.button("Save as new style").clicked();
-                    revert = ui
-                        .add_enabled(modified, egui::Button::new("Revert"))
-                        .clicked();
-                });
+                ui.checkbox(
+                    &mut self.update_auto,
+                    "Check for updates automatically (once a day)",
+                )
+                .on_hover_text(
+                    "Asks GitHub for the latest release when the app starts. Nothing is sent \
+                         except the request itself.",
+                );
             });
-            if self.draft != before {
-                self.draft_changed();
+        if let Some(url) = download {
+            if let Err(e) = updates::open_in_browser(&url) {
+                self.status = format!("Could not open {url}: {e}");
             }
-            if save {
-                self.save_changes();
-            }
-            if save_new {
-                self.save_as_new();
-            }
-            if revert {
-                self.select_style(self.current);
-            }
-            self.edit_open = open;
+            close = true;
+        }
+        if let Some(version) = skip {
+            self.update_skipped = Some(version);
+            close = true;
+        }
+        if close || !open {
+            self.update_dialog = None;
         }
     }
 
@@ -1013,6 +1263,7 @@ impl App {
                     }
                     self.detail_area = Some(area);
                     self.detail_texture_zoom = self.detail_requested_zoom;
+                    self.detail_texture_centre = self.detail_requested_centre;
                     self.detail_shown_generation = generation;
                 }
                 Msg::Tile {
@@ -1094,6 +1345,26 @@ impl App {
                 self.draft_changed();
             }
         }
+        // `BW_DARKROOM_SCREENSHOT_UPDATE=<version>` fakes a found update (no network);
+        // `…_UPDATE_DIALOG=1` also opens its dialog.
+        if let Ok(version) = std::env::var("BW_DARKROOM_SCREENSHOT_UPDATE")
+            && self.update_available.is_none()
+        {
+            let release = Release {
+                version,
+                url: updates::RELEASES_URL.into(),
+                notes:
+                    "### Added\n- **Grain controls**: size, amount and roughness.\n\n### Fixed\n- \
+                        The style menu's items can be clicked again."
+                        .into(),
+            };
+            if std::env::var_os("BW_DARKROOM_SCREENSHOT_UPDATE_DIALOG").is_some() {
+                self.update_dialog = Some(UpdateDialog::Result(CheckResult::Available(
+                    release.clone(),
+                )));
+            }
+            self.update_available = Some(release);
+        }
         // `BW_DARKROOM_SCREENSHOT_THEN_PUSH=<stops>`: once the detail has arrived, change
         // the push as the workflow panel would, and shoot after the detail re-renders.
         if let Ok(stops) = std::env::var("BW_DARKROOM_SCREENSHOT_THEN_PUSH")
@@ -1122,8 +1393,9 @@ impl App {
                 ctx.set_theme(theme);
             }
         }
+        // `…_VIEW=develop|styles` picks the right-hand panel.
         if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
-            self.view = workflow::View::from_key(&view.to_string_lossy());
+            self.module = Module::from_key(&view.to_string_lossy());
         }
         // `BW_DARKROOM_SCREENSHOT_THUMBS=1|0` sets the file browser's thumbnail rows.
         if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_THUMBS") {
@@ -1137,9 +1409,18 @@ impl App {
                 jpegs: v.contains("jpegs"),
             };
         }
-        // `BW_DARKROOM_SCREENSHOT_EDIT=1` opens the style editor for the shot.
-        if std::env::var_os("BW_DARKROOM_SCREENSHOT_EDIT").is_some() {
-            self.edit_open = true;
+        // `BW_DARKROOM_SCREENSHOT_CLOSE=image,film` closes sections (after `…_EDIT`).
+        let close = std::env::var("BW_DARKROOM_SCREENSHOT_CLOSE").ok();
+        // `BW_DARKROOM_SCREENSHOT_EDIT=1` opens every Develop section, as "Edit…" does.
+        if std::env::var_os("BW_DARKROOM_SCREENSHOT_EDIT").is_some()
+            && !self.screenshot_then_applied
+        {
+            self.module = Module::Develop;
+            widgets::open_all(ctx, &workflow::SECTION_KEYS);
+        }
+        if let Some(close) = &close {
+            let keys: Vec<&str> = close.split(',').collect();
+            widgets::set_open(ctx, &keys, false);
         }
         // `BW_DARKROOM_SCREENSHOT_ABOUT=1` opens the About window for the shot.
         if std::env::var_os("BW_DARKROOM_SCREENSHOT_ABOUT").is_some() {
@@ -1234,6 +1515,26 @@ impl App {
                 }
                 if self.exports_running > 0 {
                     ui.spinner();
+                }
+                if let Some(release) = &self.update_available
+                    && self.update_skipped.as_deref() != Some(release.version.as_str())
+                {
+                    ui.separator();
+                    let notice = egui::RichText::new(format!("Update: {}", release.version))
+                        .color(ui.visuals().hyperlink_color);
+                    if ui
+                        .button(notice)
+                        .on_hover_text(format!(
+                            "BW Darkroom {} is available (you have {}). Click for details.",
+                            release.version,
+                            crate::version::VERSION
+                        ))
+                        .clicked()
+                    {
+                        self.update_dialog = Some(UpdateDialog::Result(CheckResult::Available(
+                            release.clone(),
+                        )));
+                    }
                 }
             });
         });
@@ -1415,192 +1716,357 @@ impl App {
         }
     }
 
-    fn style_panel(&mut self, ui: &mut egui::Ui) {
+    /// The far-right icon strip: Develop and Styles at the top, Export and About at the
+    /// bottom. Clicking the active panel's icon hides the panel.
+    fn tool_strip(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
+        ui.add_space(6.0);
+        ui.vertical_centered(|ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            for (module, icon, help) in [
+                (
+                    Module::Develop,
+                    Icon::Sliders,
+                    "Develop: image, film, development, grain and print (W)",
+                ),
+                (
+                    Module::Styles,
+                    Icon::Grid,
+                    "Styles: films and processes, photographers and your own",
+                ),
+            ] {
+                let active = self.show_styles && self.module == module;
+                if widgets::strip_button(ui, icon, active, true, help).clicked() {
+                    if active {
+                        self.show_styles = false;
+                    } else {
+                        self.module = module;
+                        self.show_styles = true;
+                    }
+                }
+            }
+            let (r, _) = ui.allocate_exact_size(egui::vec2(32.0, 1.0), Sense::hover());
+            ui.painter()
+                .rect_filled(r, 0.0, t.button_border.gamma_multiply(0.7));
+        });
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+            ui.add_space(8.0);
+            ui.spacing_mut().item_spacing.y = 6.0;
+            if widgets::strip_button(ui, Icon::Info, self.about.open, true, "About BW Darkroom")
+                .clicked()
+            {
+                self.about.open = !self.about.open;
+            }
+            let can_export = self.loaded.is_some();
+            if widgets::strip_button(
+                ui,
+                Icon::Export,
+                self.export_open,
+                can_export,
+                "Export (⌘E)",
+            )
+            .clicked()
+            {
+                self.export_open = true;
+            }
+        });
+    }
+
+    /// The Develop panel: capture line, header with save actions, the style picker, then
+    /// the Image, Film, Development, Grain and Print sections.
+    fn develop_panel(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
+        if std::mem::take(&mut self.open_all_sections) {
+            widgets::open_all(ui.ctx(), &workflow::SECTION_KEYS);
+        }
+        let builtin = self.store.entries[self.current].builtin;
+        let modified = self.is_modified();
+        let (mut save, mut save_new, mut revert, mut browse) = (false, false, false, false);
+        let mut pick: Option<usize> = None;
+        let mut adjust_changed = false;
+        let source = self.loaded.as_ref().map(|l| l.source.clone());
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
-                egui::CollapsingHeader::new(egui::RichText::new("Image").heading())
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        let source = self.loaded.as_ref().map(|l| l.source.clone());
-                        if crate::image_panel::show(
-                            ui,
-                            &mut self.adjust,
-                            source.as_deref(),
-                            self.view == workflow::View::Detailed,
-                        ) {
-                            self.adjust_changed();
-                        }
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add_space(8.0);
+                if let Some(src) = source.as_deref() {
+                    let (line, hover, warning) = crate::image_panel::capture_summary(src);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(line)
+                                .font(t.font(11.5))
+                                .color(t.text_dim),
+                        )
+                        .on_hover_text(hover);
                     });
-                ui.add_space(4.0);
-                let mut pick = None;
-                let menu_action: Option<StyleAction> = None;
-                let mut popup_request = None;
-                let mut import = false;
-                egui::CollapsingHeader::new(egui::RichText::new("Styles").heading())
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        if ui
-                            .small_button("Import…")
-                            .on_hover_text("Add styles from .json files exported from BW Darkroom")
-                            .clicked()
-                        {
-                            import = true;
-                        }
-                        ui.spacing_mut().item_spacing.y = 1.0;
-                        for (i, entry) in self.store.entries.iter().enumerate() {
-                            let label = if entry.builtin {
-                                entry.style.name.clone()
-                            } else {
-                                format!("{}  (mine)", entry.style.name)
-                            };
-                            // Full-width row as before, with the "…" menu button laid on
-                            // top of its right end: the row's width never changes, so the
-                            // resizable panel can't be pushed wider.
-                            const ELLIPSIS_W: f32 = 24.0;
-                            let row = Vec2::new(ui.available_width(), 0.0);
-                            let button = egui::Button::selectable(i == self.current, label)
-                                .truncate()
-                                .right_text(" ".repeat(4))
-                                .min_size(row);
-                            let row_response = ui.add(button);
-                            if row_response.clicked() {
-                                pick = Some(i);
-                            }
-                            let rect = egui::Rect::from_min_max(
-                                egui::pos2(
-                                    row_response.rect.right() - ELLIPSIS_W,
-                                    row_response.rect.top(),
-                                ),
-                                row_response.rect.right_bottom(),
-                            );
-                            // The "…" is a click area over the row's right end that takes no
-                            // layout space (`interact` + painting, no allocation): anything that
-                            // asked for even a pixel more than the row would widen the
-                            // resizable panel, which widens the rows, and so on.
-                            let ellipsis = ui.interact(
-                                rect,
-                                egui::Id::unique(("style-ellipsis", i)),
-                                Sense::click(),
-                            );
-                            let visuals = ui.visuals();
-                            if ellipsis.hovered() {
-                                ui.painter().rect_filled(
-                                    rect.shrink(1.0),
-                                    3.0,
-                                    visuals.widgets.hovered.weak_bg_fill,
-                                );
-                            }
-                            let colour = if ellipsis.hovered() {
-                                visuals.strong_text_color()
-                            } else {
-                                visuals.text_color()
-                            };
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "…",
-                                egui::TextStyle::Button.resolve(ui.style()),
-                                colour,
-                            );
-                            let ellipsis = ellipsis.on_hover_text(
-                                "Edit, duplicate, rename, export or delete this style",
-                            );
-                            // `BW_DARKROOM_SCREENSHOT_STYLEMENU=<index>` opens a menu for screenshots.
-                            let screenshot_menu = self.screenshot.is_some()
-                                && self.style_popup.is_none()
-                                && std::env::var("BW_DARKROOM_SCREENSHOT_STYLEMENU")
-                                    .ok()
-                                    .and_then(|v| v.parse::<usize>().ok())
-                                    == Some(i);
-                            if ellipsis.clicked() || screenshot_menu {
-                                popup_request = Some((i, rect.left_bottom()));
-                            }
-                        }
-                    });
-                if let Some(i) = pick {
-                    self.select_style(i);
-                }
-                if let Some(a) = menu_action {
-                    self.handle_style_action(a);
-                }
-                if let Some(request) = popup_request {
-                    // Clicking the same "…" again closes its menu.
-                    self.style_popup = match self.style_popup {
-                        Some((open, _)) if open == request.0 => None,
-                        _ => Some(request),
-                    };
-                }
-                if import {
-                    self.import_styles();
-                }
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.heading("Workflow");
-                });
-                ui.horizontal(|ui| {
-                    for (view, label, help) in workflow::View::ALL {
-                        if ui
-                            .add(egui::Button::selectable(self.view == view, label))
-                            .on_hover_text(help)
-                            .clicked()
-                        {
-                            self.view = view;
-                        }
+                    if let Some(w) = warning {
+                        inset(ui, |ui| {
+                            ui.label(egui::RichText::new(w).font(t.font(11.5)).color(t.caution));
+                        });
                     }
+                }
+                ui.add_space(12.0);
+                inset(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("Develop")
+                            .font(t.semibold(15.0))
+                            .color(t.text),
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let read_only =
+                            "Built-in styles are read-only: use Save as… to keep your changes";
+                        save = widgets::text_button(ui, "Save", false, !builtin && modified)
+                            .on_hover_text(if builtin {
+                                read_only
+                            } else {
+                                "Save the changes to this style"
+                            })
+                            .clicked();
+                        save_new = widgets::text_button(ui, "Save as…", false, true)
+                            .on_hover_text("Keep these settings as a new style of your own")
+                            .clicked();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            revert = widgets::text_button(ui, "Revert", false, modified)
+                                .on_hover_text("Discard the changes made to this style")
+                                .clicked();
+                        });
+                    });
+                });
+                ui.add_space(12.0);
+                widgets::divider(ui);
+
+                // The style picker, as LightCraft's profile row, with a browse button.
+                let name = if modified {
+                    format!("{} (edited)", self.draft.name)
+                } else {
+                    self.draft.name.clone()
+                };
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    let w = ui.available_width() - 44.0;
+                    ui.allocate_ui(egui::vec2(w, 34.0), |ui| {
+                        widgets::dropdown(ui, "style", "Style", &name, "Choose a style", |ui| {
+                            for (group, _, title) in StyleGroup::ALL {
+                                ui.label(
+                                    egui::RichText::new(title)
+                                        .font(t.semibold(11.5))
+                                        .color(t.text_dim),
+                                );
+                                for (i, entry) in self.store.entries.iter().enumerate() {
+                                    if StyleGroup::of(entry) == group
+                                        && ui
+                                            .add(egui::Button::selectable(
+                                                i == self.current,
+                                                &entry.style.name,
+                                            ))
+                                            .clicked()
+                                    {
+                                        pick = Some(i);
+                                    }
+                                }
+                                ui.add_space(4.0);
+                            }
+                        });
+                    });
+                    browse = widgets::strip_button(ui, Icon::Grid, false, true, "Browse styles")
+                        .clicked();
+                });
+                ui.add_space(4.0);
+                widgets::divider(ui);
+
+                widgets::section(ui, "image", "Image", true, |ui| {
+                    adjust_changed =
+                        crate::image_panel::show(ui, &mut self.adjust, source.as_deref());
                 });
                 let before = self.draft.clone();
-                match self.view {
-                    workflow::View::Detailed => {
-                        workflow::detailed(ui, &mut self.draft, self.summary.as_ref());
-                    }
-                    workflow::View::Simple => {
-                        workflow::simple(ui, &mut self.draft, self.summary.as_ref());
-                    }
-                    workflow::View::Photographers => {
-                        if let Some(i) = workflow::photographers(ui, &self.draft, &self.presets) {
-                            self.apply_preset(i);
-                        }
-                    }
-                }
+                let draft = &mut self.draft;
+                let summary = self.summary.as_ref();
+                widgets::section(ui, "film", "Film", true, |ui| {
+                    workflow::film_section(ui, draft)
+                });
+                widgets::section(ui, "development", "Development", true, |ui| {
+                    workflow::development_section(ui, draft, summary)
+                });
+                widgets::section(ui, "grain", "Grain", false, |ui| {
+                    workflow::grain_section(ui, draft, summary)
+                });
+                widgets::section(ui, "print", "Print", false, |ui| {
+                    workflow::print_section(ui, draft)
+                });
                 if self.draft != before {
                     self.draft_changed();
                 }
+            });
+        if adjust_changed {
+            self.adjust_changed();
+        }
+        if save {
+            self.save_changes();
+        }
+        if save_new {
+            self.save_as_new();
+        }
+        if revert {
+            self.select_style(self.current);
+        }
+        if browse {
+            self.module = Module::Styles;
+        }
+        if let Some(i) = pick {
+            self.pick_style(i);
+        }
+    }
 
-                ui.add_space(6.0);
-                ui.separator();
-                let builtin = self.store.entries[self.current].builtin;
-                let modified = self.is_modified();
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Save as new style").clicked() {
-                        self.save_as_new();
-                    }
-                    if ui
-                        .add_enabled(!builtin && modified, egui::Button::new("Save changes"))
-                        .on_disabled_hover_text(if builtin {
-                            "Built-in styles are read-only"
-                        } else {
-                            "No changes"
-                        })
-                        .clicked()
-                    {
-                        self.save_changes();
-                    }
-                    if ui
-                        .add_enabled(modified, egui::Button::new("Revert"))
-                        .clicked()
-                    {
-                        self.select_style(self.current);
-                    }
-                    if ui
-                        .add_enabled(!builtin, egui::Button::new("Delete"))
-                        .clicked()
-                    {
-                        self.delete_dialog = Some(self.current);
-                    }
+    /// Apply style `i`: photographer styles bring their scene contrast, as presets do.
+    fn pick_style(&mut self, i: usize) {
+        let name = &self.store.entries[i].style.name;
+        match self.presets.iter().position(|p| &p.style.name == name) {
+            Some(p) => self.apply_preset(p),
+            None => self.select_style(i),
+        }
+    }
+
+    /// The Styles panel: styles in collapsible groups, as LightCraft's presets. Click to
+    /// apply; right-click or "…" for Edit, Duplicate, Rename, Export, Move and Delete.
+    fn styles_panel(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
+        let mut pick = None;
+        let mut popup_request = None;
+        let mut menu_action = None;
+        let (mut import, mut save_new) = (false, false);
+        ui.add_space(12.0);
+        inset(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Styles")
+                        .font(t.semibold(15.0))
+                        .color(t.text),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    import = widgets::text_button(ui, "Import…", false, true)
+                        .on_hover_text("Add styles from .json files exported from BW Darkroom")
+                        .clicked();
+                    save_new = widgets::text_button(ui, "Save as…", false, true)
+                        .on_hover_text("Keep the current settings as a new style of your own")
+                        .clicked();
                 });
             });
+        });
+        ui.add_space(12.0);
+        widgets::divider(ui);
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (group, key, title) in StyleGroup::ALL {
+                    let members: Vec<usize> = (0..self.store.entries.len())
+                        .filter(|&i| StyleGroup::of(&self.store.entries[i]) == group)
+                        .collect();
+                    if members.is_empty() || !widgets::group_header(ui, key, title, members.len()) {
+                        continue;
+                    }
+                    for i in members {
+                        let entry = &self.store.entries[i];
+                        let w = ui.available_width();
+                        let (r, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), Sense::click());
+                        let selected = i == self.current;
+                        let menu_open = self.style_popup.is_some_and(|(o, _)| o == i);
+                        let p = ui.painter();
+                        if selected {
+                            p.rect_filled(r, 0.0, t.tool_active);
+                        } else if resp.hovered() || menu_open {
+                            p.rect_filled(r, 0.0, t.hover.gamma_multiply(0.7));
+                        }
+                        let text_rect = egui::Rect::from_min_max(
+                            egui::pos2(r.left() + 40.0, r.top()),
+                            egui::pos2(r.right() - 34.0, r.bottom()),
+                        );
+                        let colour = if selected { t.text } else { t.text_label };
+                        p.with_clip_rect(text_rect).text(
+                            text_rect.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            &entry.style.name,
+                            t.font(13.0),
+                            colour,
+                        );
+                        let hover = match self
+                            .presets
+                            .iter()
+                            .find(|p| p.style.name == entry.style.name)
+                        {
+                            Some(p) => format!("{}\n\n{}", p.look, p.basis),
+                            None => entry.style.name.clone(),
+                        };
+                        let resp = resp.on_hover_text(hover);
+                        // "…" over the row's right end, shown on hover, selection or while open.
+                        let dots = egui::Rect::from_min_max(
+                            egui::pos2(r.right() - 32.0, r.top()),
+                            egui::pos2(r.right() - 8.0, r.bottom()),
+                        );
+                        let ellipsis = ui.interact(
+                            dots,
+                            egui::Id::unique(("style-ellipsis", i)),
+                            Sense::click(),
+                        );
+                        if resp.hovered() || ellipsis.hovered() || selected || menu_open {
+                            if ellipsis.hovered() {
+                                ui.painter().rect_filled(dots.shrink(2.0), 3.0, t.hover);
+                            }
+                            ui.painter().text(
+                                dots.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "…",
+                                t.font(13.0),
+                                t.text_label,
+                            );
+                        }
+                        let ellipsis = ellipsis
+                            .on_hover_text("Edit, duplicate, rename, export or delete this style");
+                        // `BW_DARKROOM_SCREENSHOT_STYLEMENU=<index>` opens a menu for screenshots.
+                        let screenshot_menu = self.screenshot.is_some()
+                            && self.style_popup.is_none()
+                            && std::env::var("BW_DARKROOM_SCREENSHOT_STYLEMENU")
+                                .ok()
+                                .and_then(|v| v.parse::<usize>().ok())
+                                == Some(i);
+                        if ellipsis.clicked() || screenshot_menu {
+                            popup_request = Some((i, dots.left_bottom()));
+                        } else if resp.clicked() {
+                            pick = Some(i);
+                        }
+                        let (up, down) = (self.store.can_move(i, -1), self.store.can_move(i, 1));
+                        let builtin = entry.builtin;
+                        resp.context_menu(|ui| {
+                            if let Some(a) = style_menu::items(ui, i, builtin, up, down) {
+                                menu_action = Some(a);
+                            }
+                        });
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+        if let Some(i) = pick {
+            self.pick_style(i);
+        }
+        if let Some(a) = menu_action {
+            self.handle_style_action(a);
+        }
+        if let Some(request) = popup_request {
+            // Clicking the same "…" again closes its menu.
+            self.style_popup = match self.style_popup {
+                Some((open, _)) if open == request.0 => None,
+                _ => Some(request),
+            };
+        }
+        if import {
+            self.import_styles();
+        }
+        if save_new {
+            self.save_as_new();
+        }
     }
 
     fn gallery(&mut self, ui: &mut egui::Ui) {
@@ -1855,13 +2321,27 @@ impl eframe::App for App {
             .size_range(120.0..=360.0)
             .show_collapsible(ui, &mut show_browser, |ui| self.browser_panel(ui));
         self.show_browser = show_browser;
+        let tokens = Tokens::get(ctx);
+        egui::Panel::right("tool_strip")
+            .exact_size(48.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::NONE
+                    .fill(tokens.chrome)
+                    .stroke(egui::Stroke::new(1.0, tokens.divider)),
+            )
+            .show(ui, |ui| self.tool_strip(ui));
         let mut show_styles = self.show_styles;
-        egui::Panel::right("styles")
-            .frame(panel_frame)
+        let tools_frame = egui::Frame::side_top_panel(ui.style()).inner_margin(0);
+        egui::Panel::right("tools")
+            .frame(tools_frame)
             .resizable(true)
-            .default_size(300.0)
-            .size_range(250.0..=480.0)
-            .show_collapsible(ui, &mut show_styles, |ui| self.style_panel(ui));
+            .default_size(290.0)
+            .size_range(260.0..=480.0)
+            .show_collapsible(ui, &mut show_styles, |ui| match self.module {
+                Module::Develop => self.develop_panel(ui),
+                Module::Styles => self.styles_panel(ui),
+            });
         self.show_styles = show_styles;
         let mut show_gallery = self.show_gallery;
         egui::Panel::bottom("gallery")
@@ -1870,7 +2350,10 @@ impl eframe::App for App {
             .size_range(80.0..=300.0)
             .show_collapsible(ui, &mut show_gallery, |ui| self.gallery(ui));
         self.show_gallery = show_gallery;
-        egui::CentralPanel::default().show(ui, |ui| self.central(ui));
+        // The photo sits on the darker canvas colour, as in LightCraft.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(ui.style()).fill(tokens.canvas))
+            .show(ui, |ui| self.central(ui));
 
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::E))
             && self.loaded.is_some()
@@ -1884,6 +2367,15 @@ impl eframe::App for App {
         if self.menu.as_ref().is_some_and(|m| m.take_about_request()) {
             self.about.open = true;
         }
+        #[cfg(target_os = "macos")]
+        if self.menu.as_ref().is_some_and(|m| m.take_check_request()) {
+            self.check_for_updates(ctx);
+        }
+        if std::mem::take(&mut self.about.check_requested) {
+            self.check_for_updates(ctx);
+        }
+        self.poll_update_check();
+        self.update_window(ctx);
         self.about.show(ctx);
         self.style_popup(ctx);
         self.style_dialogs(ctx);
@@ -1893,6 +2385,7 @@ impl eframe::App for App {
             let mut open = true;
             let mut zoom = self.detail_zoom;
             let ppp = self.pixels_per_point;
+            let mut drag: Option<(Vec2, Vec2, [f32; 2])> = None;
             egui::Window::new("Detail")
                 // A fresh id drops the oversized window size saved by earlier versions.
                 .id(egui::Id::unique("detail-window"))
@@ -1915,20 +2408,49 @@ impl eframe::App for App {
                             ui.spinner().on_hover_text("Updating to the latest settings");
                         }
                         ui.label(
-                            egui::RichText::new("Click the image to move the outlined area").small().weak(),
+                            egui::RichText::new("Drag here, or click the photo, to move the area").small().weak(),
                         );
                     });
                     match &self.detail {
                         Some(tex) => {
                             // Texture pixels → points so the zoom is exact on any display.
                             let size = tex.size_vec2() * f32::from(self.detail_texture_zoom) / ppp;
-                            ui.add(egui::Image::new(tex).fit_to_exact_size(size));
+                            let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
+                            let [x0, y0, x1, y1] = self.detail_area.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                            let frac = Vec2::new((x1 - x0) / size.x, (y1 - y0) / size.y);
+                            // Until the render for the current centre arrives, slide the one
+                            // on screen by the difference, clipped to the view.
+                            let (tc, c) = (self.detail_texture_centre, self.detail_centre);
+                            let shift = Vec2::new((tc[0] - c[0]) / frac.x, (tc[1] - c[1]) / frac.y);
+                            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                            ui.painter()
+                                .with_clip_rect(rect)
+                                .image(tex.id(), rect.translate(shift), uv, Color32::WHITE);
+                            if response.dragged() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                                drag = Some((response.drag_delta(), frac, [x1 - x0, y1 - y0]));
+                            } else if response.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
+                            response.on_hover_text("Drag to move the area you're inspecting");
                         }
                         None => {
                             ui.allocate_ui(egui::vec2(DETAIL_VIEW_PT, DETAIL_VIEW_PT), |ui| ui.spinner());
                         }
                     }
                 });
+            if let Some((delta, frac, [w, h])) = drag
+                && delta != Vec2::ZERO
+            {
+                // Grabbing the photo: dragging right shows what lies to the left. The area
+                // stays inside the frame.
+                let clamp = |v: f32, half: f32| v.clamp(half.min(0.5), (1.0 - half).max(0.5));
+                self.detail_centre = [
+                    clamp(self.detail_centre[0] - delta.x * frac.x, w / 2.0),
+                    clamp(self.detail_centre[1] - delta.y * frac.y, h / 2.0),
+                ];
+                self.request_detail();
+            }
             if zoom != self.detail_zoom {
                 self.detail_zoom = zoom;
                 self.request_detail();
@@ -1944,21 +2466,10 @@ impl eframe::App for App {
             return;
         };
         let now = started.elapsed().as_secs_f64();
-        // Move, press, release on successive frames, one click at a time.
-        if let Some(click) = self.screenshot_clicks.iter_mut().find(|c| c.3 < 3) {
-            if now >= click.0 {
-                let pos = egui::pos2(click.1, click.2);
-                let event = match click.3 {
-                    0 => egui::Event::PointerMoved(pos),
-                    stage => egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: stage == 1,
-                        modifiers: Default::default(),
-                    },
-                };
-                raw_input.events.push(event);
-                click.3 += 1;
+        // One event per frame, one gesture at a time.
+        if let Some(gesture) = self.screenshot_clicks.iter_mut().find(|g| !g.done()) {
+            if now >= gesture.at_s {
+                raw_input.events.push(gesture.next_event());
             }
             ctx.request_repaint();
         }
@@ -1976,7 +2487,7 @@ impl eframe::App for App {
         }
         self.save_adjust();
         storage.set_string(KEY_FOLDER, self.folder.display().to_string());
-        storage.set_string(KEY_VIEW, self.view.key().into());
+        storage.set_string(KEY_MODULE, self.module.key().into());
         let theme = match self.theme {
             egui::ThemePreference::Light => "light",
             egui::ThemePreference::Dark => "dark",
@@ -1989,6 +2500,12 @@ impl eframe::App for App {
         );
         let flag_str = |b: bool| if b { "1" } else { "0" }.to_string();
         storage.set_string(KEY_BROWSER_BITMAPS, flag_str(self.browser_filter.bitmaps));
+        storage.set_string(KEY_UPDATE_AUTO, flag_str(self.update_auto));
+        storage.set_string(KEY_UPDATE_LAST, self.update_last_check.to_string());
+        storage.set_string(
+            KEY_UPDATE_SKIPPED,
+            self.update_skipped.clone().unwrap_or_default(),
+        );
         storage.set_string(KEY_BROWSER_JPEGS, flag_str(self.browser_filter.jpegs));
         let flag = |b: bool| if b { '1' } else { '0' };
         storage.set_string(

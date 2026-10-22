@@ -22,6 +22,7 @@ dirs = "7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true }
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Native application menu (About, Hide, Quit, Window), MIT OR Apache-2.0.
