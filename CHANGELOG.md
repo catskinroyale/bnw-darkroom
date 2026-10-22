@@ -5,6 +5,9 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The README no longer has a Versioning section.
+
 ## [0.6.2] - 2026-10-22
 
 ### Added

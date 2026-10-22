@@ -67,24 +67,6 @@ Set `BW_RAW_SAMPLE=/path/to/file.NEF` to include a real raw file in `cargo test`
 
 After editing `data/development/mdc-times.csv`, run `python3 -I tools/curate_times.py`.
 
-## Versioning
-
-The project uses [semantic versioning](https://semver.org): `MAJOR.MINOR.PATCH`, from
-`[workspace.package] version` in `Cargo.toml` — the one place the version is set. The
-desktop app's About window (BW Darkroom ▸ About BW Darkroom), export recipes and the macOS
-bundle all read it; builds also embed the git commit, e.g. `0.2.0 (cf32c9d)`.
-
-Before 1.0.0, a minor release adds features or makes breaking changes and a patch release
-fixes bugs. To release, with everything committed:
-
-```sh
-tools/release.sh minor            # or patch / major; add --dry-run to preview
-git push && git push origin v0.2.0
-```
-
-The script bumps the version, turns the changelog's Unreleased section into a dated
-release, commits, and creates an annotated `vX.Y.Z` tag with the release notes.
-
 ## Licensing
 
 | Part | Licence |
