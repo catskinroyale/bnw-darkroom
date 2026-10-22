@@ -1,5 +1,7 @@
 # BW Darkroom
 
+![BW Darkroom: a raw photo rendered as Tri-X developed in D-76, with the file browser, style list, workflow controls and style gallery](docs/images/screenshot.jpg)
+
 A black-and-white photographic emulation engine in Rust, with a command-line tool and a
 desktop app. Film, developer and processing are modelled as separate components that
 interact through a simulated negative; printing is a separate stage on that negative.
