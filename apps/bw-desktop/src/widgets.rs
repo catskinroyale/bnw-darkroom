@@ -673,6 +673,30 @@ pub fn strip_button(ui: &mut Ui, icon: Icon, active: bool, enabled: bool, help: 
     resp.on_hover_text(help)
 }
 
+/// A small icon button for the top bar: a rounded square when active or hovered.
+pub fn icon_button(ui: &mut Ui, icon: Icon, active: bool, help: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (r, resp) = ui.allocate_exact_size(vec2(28.0, 24.0), Sense::click());
+    let p = ui.painter();
+    if active {
+        p.rect_filled(r, 4.0, t.tool_active);
+    } else if resp.hovered() {
+        p.rect_filled(r, 4.0, t.hover.gamma_multiply(0.7));
+    }
+    let c = if active || resp.hovered() {
+        t.pick
+    } else {
+        t.icon
+    };
+    paint_icon(
+        p,
+        Rect::from_center_size(r.center(), vec2(18.0, 18.0)),
+        icon,
+        c,
+    );
+    resp.on_hover_text(help)
+}
+
 /// Line icons drawn in code on a 20 × 20 grid with 1.5 px strokes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
@@ -698,6 +722,24 @@ pub enum Icon {
     Drive,
     /// Add (Browse Folder…).
     Plus,
+    /// Show or hide the folder tree: a window with a sidebar.
+    Sidebar,
+    /// Light theme.
+    Sun,
+    /// Dark theme.
+    Moon,
+    /// Theme follows the system: a half-filled circle.
+    Auto,
+    /// The treated photo: a filled frame.
+    Treated,
+    /// Original and treated side by side: two frames.
+    SideBySide,
+    /// The original photo: an empty frame.
+    Original,
+    /// Detail 1:1: a magnifying glass.
+    Magnifier,
+    /// File name and capture details: an open book.
+    Book,
 }
 
 /// Paint `icon` in `rect`.
@@ -799,6 +841,104 @@ pub fn paint_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Plus => {
             line(&[(10.0, 4.0), (10.0, 16.0)]);
             line(&[(4.0, 10.0), (16.0, 10.0)]);
+        }
+        Icon::Sidebar => {
+            p.rect_stroke(
+                Rect::from_min_size(at(2.5, 4.0), vec2(15.0, 12.0) * s),
+                2.0,
+                stroke,
+                StrokeKind::Middle,
+            );
+            line(&[(7.5, 4.0), (7.5, 16.0)]);
+        }
+        Icon::Sun => {
+            p.circle_stroke(at(10.0, 10.0), 3.2 * s, stroke);
+            for k in 0..8 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                let (c, sn) = (a.cos(), a.sin());
+                p.line_segment(
+                    [
+                        at(10.0 + 5.5 * c, 10.0 + 5.5 * sn),
+                        at(10.0 + 7.5 * c, 10.0 + 7.5 * sn),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        Icon::Moon => {
+            // A crescent: an outer arc and an inner arc meeting at the tips.
+            let arc = |cx: f32, cy: f32, r: f32, from: f32, to: f32| -> Vec<Pos2> {
+                (0..=16)
+                    .map(|i| {
+                        let a = from + (to - from) * i as f32 / 16.0;
+                        at(cx + r * a.cos(), cy + r * a.sin())
+                    })
+                    .collect()
+            };
+            use std::f32::consts::PI;
+            let mut pts = arc(10.0, 10.0, 7.0, -0.35 * PI, 1.35 * PI);
+            pts.extend(arc(12.5, 7.5, 5.2, 1.08 * PI, -0.08 * PI));
+            pts.push(pts[0]);
+            p.add(egui::Shape::line(pts, stroke));
+        }
+        Icon::Treated => {
+            p.rect_filled(
+                Rect::from_min_size(at(3.0, 5.0), vec2(14.0, 10.0) * s),
+                1.5,
+                color,
+            );
+        }
+        Icon::SideBySide => {
+            for x in [2.0, 10.75] {
+                p.rect_stroke(
+                    Rect::from_min_size(at(x, 5.5), vec2(7.25, 9.0) * s),
+                    1.0,
+                    stroke,
+                    StrokeKind::Middle,
+                );
+            }
+        }
+        Icon::Original => {
+            p.rect_stroke(
+                Rect::from_min_size(at(3.0, 5.0), vec2(14.0, 10.0) * s),
+                1.5,
+                stroke,
+                StrokeKind::Middle,
+            );
+        }
+        Icon::Magnifier => {
+            p.circle_stroke(at(8.5, 8.5), 5.0 * s, stroke);
+            p.line_segment([at(12.2, 12.2), at(17.0, 17.0)], Stroke::new(2.0, color));
+        }
+        Icon::Book => {
+            // Two pages meeting at the spine.
+            line(&[(10.0, 5.5), (10.0, 16.0)]);
+            line(&[
+                (10.0, 5.5),
+                (6.5, 4.0),
+                (2.5, 4.5),
+                (2.5, 15.0),
+                (6.5, 14.5),
+                (10.0, 16.0),
+            ]);
+            line(&[
+                (10.0, 5.5),
+                (13.5, 4.0),
+                (17.5, 4.5),
+                (17.5, 15.0),
+                (13.5, 14.5),
+                (10.0, 16.0),
+            ]);
+        }
+        Icon::Auto => {
+            p.circle_stroke(at(10.0, 10.0), 7.0 * s, stroke);
+            let half: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 16.0;
+                    at(10.0 + 7.0 * a.cos(), 10.0 + 7.0 * a.sin())
+                })
+                .collect();
+            p.add(egui::Shape::convex_polygon(half, color, Stroke::NONE));
         }
     }
 }

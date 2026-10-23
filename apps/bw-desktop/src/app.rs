@@ -28,6 +28,7 @@ use bw_raw::RawAdjust;
 const KEY_FOLDER: &str = "folder";
 const KEY_MODULE: &str = "right_module";
 const KEY_THEME: &str = "theme";
+const KEY_SHOW_INFO: &str = "show_info";
 const KEY_BROWSER_BITMAPS: &str = "browser_bitmaps";
 const KEY_BROWSER_JPEGS: &str = "browser_jpegs";
 const KEY_UPDATE_AUTO: &str = "update_auto";
@@ -118,6 +119,34 @@ impl ScriptedPointer {
                 egui::Event::PointerMoved(self.start + (end - self.start) * t)
             }
         }
+    }
+}
+
+/// What the image area shows: the treated photo (the default), the original and the
+/// treated photo side by side, or the original alone. The Detail window follows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Compare {
+    Treated,
+    SideBySide,
+    Original,
+}
+
+impl Compare {
+    /// The next view for the C key: Treated → Side by side → Original → Treated.
+    fn next(self) -> Compare {
+        match self {
+            Compare::Treated => Compare::SideBySide,
+            Compare::SideBySide => Compare::Original,
+            Compare::Original => Compare::Treated,
+        }
+    }
+
+    fn shows_original(self) -> bool {
+        self != Compare::Treated
+    }
+
+    fn shows_treated(self) -> bool {
+        self != Compare::Original
     }
 }
 
@@ -246,7 +275,10 @@ pub struct App {
     preview_generation: u64,
     preview: Option<TextureHandle>,
     preview_ms: Option<u128>,
-    show_original: bool,
+    /// Treated, side by side or original, in the image area and the Detail window.
+    compare: Compare,
+    /// The toolbar shows the file name and capture details.
+    show_info: bool,
 
     show_browser: bool,
     show_styles: bool,
@@ -274,6 +306,8 @@ pub struct App {
     /// newer render is on its way.
     detail_shown_generation: u64,
     detail: Option<TextureHandle>,
+    /// The detail crop before development, for side-by-side comparison.
+    detail_original: Option<TextureHandle>,
 
     tiles_generation: u64,
     tiles: Vec<Tile>,
@@ -405,7 +439,8 @@ impl App {
             preview_generation: 0,
             preview: None,
             preview_ms: None,
-            show_original: false,
+            compare: Compare::Treated,
+            show_info: get(KEY_SHOW_INFO).is_none_or(|v| v != "0"),
             show_browser: panels[0],
             show_styles: panels[1],
             show_gallery: panels[2],
@@ -422,6 +457,7 @@ impl App {
             detail_texture_centre: [0.5, 0.5],
             detail_shown_generation: 0,
             detail: None,
+            detail_original: None,
             tiles_generation: 0,
             export,
             export_open: false,
@@ -495,6 +531,7 @@ impl App {
         self.preview = None;
         self.original = None;
         self.detail = None;
+        self.detail_original = None;
         self.tiles.iter_mut().for_each(|t| *t = Tile::Pending);
         self.status = format!("Loading {}…", file_name(&path));
         let _ = self.jobs.send(Job::Load {
@@ -1262,8 +1299,19 @@ impl App {
                 Msg::Detail {
                     generation,
                     image,
+                    original,
                     area,
                 } if generation == self.detail_generation => {
+                    match &mut self.detail_original {
+                        Some(tex) => tex.set(original, TextureOptions::NEAREST),
+                        None => {
+                            self.detail_original = Some(ctx.load_texture(
+                                "detail-original",
+                                original,
+                                TextureOptions::NEAREST,
+                            ));
+                        }
+                    }
                     // Nearest-neighbour: at 200 % each image pixel shows as a crisp block.
                     match &mut self.detail {
                         Some(tex) => tex.set(image, TextureOptions::NEAREST),
@@ -1404,6 +1452,14 @@ impl App {
                 ctx.set_theme(theme);
             }
         }
+        // `…_COMPARE=side|original` sets the image area's view.
+        if let Ok(v) = std::env::var("BW_DARKROOM_SCREENSHOT_COMPARE") {
+            self.compare = match v.as_str() {
+                "side" => Compare::SideBySide,
+                "original" => Compare::Original,
+                _ => Compare::Treated,
+            };
+        }
         // `…_VIEW=develop|styles` picks the right-hand panel.
         if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
             self.module = Module::from_key(&view.to_string_lossy());
@@ -1465,62 +1521,48 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("BW Darkroom")
-                .on_hover_text(format!("Version {}", crate::version::full()));
+            // The window's title bar already names the app; the version is in About.
+            if widgets::icon_button(
+                ui,
+                Icon::Sidebar,
+                self.show_browser,
+                "Show or hide the folder tree (B)",
+            )
+            .clicked()
+            {
+                self.show_browser = !self.show_browser;
+            }
             #[cfg(not(target_os = "macos"))]
             if ui.small_button("About").clicked() {
                 self.about.open = true;
             }
             ui.separator();
-            ui.toggle_value(&mut self.show_browser, "Folders")
-                .on_hover_text("Show or hide the folder tree (B)");
-            ui.toggle_value(&mut self.show_styles, "Workflow")
-                .on_hover_text("Show or hide the styles and workflow panel (W)");
             ui.toggle_value(&mut self.show_gallery, "Gallery")
                 .on_hover_text("Show or hide the style gallery: this photo in every style (G)");
             ui.toggle_value(&mut self.show_filmstrip, "Images")
                 .on_hover_text("Show or hide the strip of photos in the chosen folder (I)");
-            ui.separator();
-            if ui
-                .button("Open folder…")
-                .on_hover_text("Choose a folder; its photos appear in the strip below the image")
-                .clicked()
-            {
-                self.pick_folder();
-            }
-            ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let can_export = self.loaded.is_some();
-                let mut theme = self.theme;
-                for (choice, label, help) in [
-                    (
+                // One button steps through the themes: Auto → Light → Dark → Auto.
+                let (icon, next, help) = match self.theme {
+                    egui::ThemePreference::System => (
+                        Icon::Auto,
+                        egui::ThemePreference::Light,
+                        "Theme: Auto, following the system appearance. Click for Light.",
+                    ),
+                    egui::ThemePreference::Light => (
+                        Icon::Sun,
                         egui::ThemePreference::Dark,
-                        "Dark",
-                        "Dark interface: easier on the eyes when judging prints in a dim room",
+                        "Theme: Light. Click for Dark.",
                     ),
-                    (egui::ThemePreference::Light, "Light", "Light interface"),
-                    (
+                    egui::ThemePreference::Dark => (
+                        Icon::Moon,
                         egui::ThemePreference::System,
-                        "Auto",
-                        "Follow the system appearance (light or dark)",
+                        "Theme: Dark, easier on the eyes when judging prints in a dim room. Click for Auto.",
                     ),
-                ] {
-                    ui.selectable_value(&mut theme, choice, label)
-                        .on_hover_text(help);
-                }
-                if theme != self.theme {
-                    self.theme = theme;
-                    ui.ctx().set_theme(theme);
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(can_export, egui::Button::new("Export…"))
-                    .on_hover_text(
-                        "Choose format, size and file name, then render at full quality (⌘E)",
-                    )
-                    .clicked()
-                {
-                    self.export_open = true;
+                };
+                if widgets::icon_button(ui, icon, false, help).clicked() {
+                    self.theme = next;
+                    ui.ctx().set_theme(next);
                 }
                 if self.exports_running > 0 {
                     ui.spinner();
@@ -2171,41 +2213,95 @@ impl App {
         }
     }
 
-    fn central(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.show_original, "Show original (O)");
-            if ui
-                .checkbox(&mut self.detail_enabled, "Detail 1:1 (D)")
-                .on_hover_text("Click the image to inspect grain and edges at full resolution")
-                .changed()
-                && self.detail_enabled
+    /// The toolbar between the photo and the style gallery: the Treated / Side by side /
+    /// Original view, the Detail window, and the photo's capture line.
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for (mode, icon, help) in [
+                (
+                    Compare::Treated,
+                    Icon::Treated,
+                    "Treated: the photo as printed with the current style (C cycles the views)",
+                ),
+                (
+                    Compare::SideBySide,
+                    Icon::SideBySide,
+                    "Side by side: the original and the treated photo next to each other; the \
+                     Detail window shows both too. Click again to go back to the treated photo.",
+                ),
+                (
+                    Compare::Original,
+                    Icon::Original,
+                    "Original: the photo before black-and-white development, with your Image adjustments (O)",
+                ),
+            ] {
+                let active = self.compare == mode;
+                if widgets::icon_button(ui, icon, active, help).clicked() {
+                    self.compare = if active && mode == Compare::SideBySide {
+                        Compare::Treated
+                    } else {
+                        mode
+                    };
+                }
+            }
+            ui.separator();
+            if widgets::icon_button(
+                ui,
+                Icon::Magnifier,
+                self.detail_enabled,
+                "Detail 1:1: inspect grain and edges at full resolution (D). Click the photo to choose the area.",
+            )
+            .clicked()
             {
-                self.request_detail();
+                self.detail_enabled = !self.detail_enabled;
+                if self.detail_enabled {
+                    self.request_detail();
+                }
             }
-            if let Some(ms) = self.preview_ms {
-                ui.label(
-                    egui::RichText::new(format!("preview {ms} ms"))
-                        .weak()
-                        .small(),
-                );
+            ui.separator();
+            if widgets::icon_button(
+                ui,
+                Icon::Book,
+                self.show_info,
+                "Show or hide the file name and capture details",
+            )
+            .clicked()
+            {
+                self.show_info = !self.show_info;
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(&self.status).small());
-            });
+            if self.show_info {
+                ui.add_space(6.0);
+                ui.add(egui::Label::new(egui::RichText::new(&self.status).small()).truncate());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(ms) = self.preview_ms {
+                        ui.label(egui::RichText::new(format!("preview {ms} ms")).weak().small())
+                            .on_hover_text("How long the last preview took to render");
+                    }
+                });
+            }
         });
+    }
 
-        if self.summary.is_none() && self.loaded.is_some() && !self.show_original {
+    fn central(&mut self, ui: &mut egui::Ui) {
+        if self.summary.is_none() && self.loaded.is_some() && self.compare.shows_treated() {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 "This film and developer have no published development time. Choose another developer.",
             );
         }
-        let texture = if self.show_original {
-            self.original.as_ref()
-        } else {
-            self.preview.as_ref().or(self.original.as_ref())
+        let treated = self.preview.as_ref().or(self.original.as_ref()).cloned();
+        let original = self.original.clone();
+        // Each pane: its texture and, side by side, its caption.
+        let panes: Vec<(TextureHandle, Option<&str>)> = match (self.compare, original, treated) {
+            (Compare::SideBySide, Some(o), Some(t)) => {
+                vec![(o, Some("Original")), (t, Some("Treated"))]
+            }
+            (Compare::Original, Some(o), _) => vec![(o, None)],
+            (_, _, Some(t)) => vec![(t, None)],
+            _ => Vec::new(),
         };
-        let Some(texture) = texture.cloned() else {
+        if panes.is_empty() {
             ui.centered_and_justified(|ui| {
                 if self.loading {
                     ui.spinner();
@@ -2219,30 +2315,52 @@ impl App {
                 }
             });
             return;
-        };
+        }
 
+        const GAP: f32 = 12.0;
+        const CAPTION: f32 = 20.0;
         let available = ui.available_size();
-        // Render the preview at the panel's real pixel size, so grain is shown as it
-        // will look at this viewing size (rounded to avoid re-rendering on tiny resizes).
-        let wanted = ((available.x.max(available.y) * ui.ctx().pixels_per_point()) as usize)
-            .div_ceil(256)
-            * 256;
+        let n = panes.len() as f32;
+        let pane = Vec2::new((available.x - GAP * (n - 1.0)) / n, available.y);
+        // Render the preview at the pane's real pixel size, so grain is shown as it will
+        // look at this viewing size (rounded to avoid re-rendering on tiny resizes).
+        let wanted =
+            ((pane.x.max(pane.y) * ui.ctx().pixels_per_point()) as usize).div_ceil(256) * 256;
         let wanted = wanted.clamp(768, 3072);
         if wanted != self.preview_edge {
             self.preview_edge = wanted;
             self.request_preview();
         }
-        let tex_size = texture.size_vec2();
-        let scale = (available.x / tex_size.x).min(available.y / tex_size.y);
-        // Lay the image out explicitly: clicks and the detail outline are measured against
-        // the rectangle the image is actually drawn in, not the whole panel.
+        // Lay the images out explicitly: clicks and the detail outline are measured against
+        // the rectangles the images are actually drawn in, not the whole panel.
         let (area_rect, response) = ui.allocate_exact_size(available, Sense::click());
-        let image_rect = egui::Rect::from_center_size(area_rect.center(), tex_size * scale);
-        egui::Image::new(&texture).paint_at(ui, image_rect);
+        let caption_h = if panes.len() > 1 { CAPTION } else { 0.0 };
+        let mut image_rects = Vec::new();
+        for (i, (texture, caption)) in panes.iter().enumerate() {
+            let left = area_rect.min.x + i as f32 * (pane.x + GAP);
+            let slot = egui::Rect::from_min_size(
+                Pos2::new(left, area_rect.min.y + caption_h),
+                Vec2::new(pane.x, pane.y - caption_h),
+            );
+            let tex_size = texture.size_vec2();
+            let scale = (slot.width() / tex_size.x).min(slot.height() / tex_size.y);
+            let image_rect = egui::Rect::from_center_size(slot.center(), tex_size * scale);
+            egui::Image::new(texture).paint_at(ui, image_rect);
+            if let Some(caption) = caption {
+                ui.painter().text(
+                    Pos2::new(image_rect.center().x, image_rect.min.y - 4.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    *caption,
+                    egui::FontId::proportional(12.0),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+            image_rects.push(image_rect);
+        }
         if self.detail_enabled
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
-            && image_rect.contains(pos)
+            && let Some(image_rect) = image_rects.iter().find(|r| r.contains(pos))
         {
             self.detail_centre = [
                 ((pos.x - image_rect.min.x) / image_rect.width()).clamp(0.0, 1.0),
@@ -2253,27 +2371,30 @@ impl App {
         if self.detail_enabled
             && let Some([x0, y0, x1, y1]) = self.detail_area
         {
-            // Outline of exactly what the detail window shows (moved inwards at edges).
-            let at = |fx: f32, fy: f32| {
-                Pos2::new(
-                    image_rect.min.x + fx * image_rect.width(),
-                    image_rect.min.y + fy * image_rect.height(),
-                )
-            };
-            let outline = egui::Rect::from_min_max(at(x0, y0), at(x1, y1));
-            let painter = ui.painter_at(image_rect);
-            painter.rect_stroke(
-                outline,
-                0.0,
-                Stroke::new(2.5, Color32::from_black_alpha(140)),
-                egui::StrokeKind::Outside,
-            );
-            painter.rect_stroke(
-                outline,
-                0.0,
-                Stroke::new(1.5, Color32::from_rgb(230, 120, 60)),
-                egui::StrokeKind::Outside,
-            );
+            // Outline of exactly what the detail window shows (moved inwards at edges),
+            // on each pane.
+            for image_rect in &image_rects {
+                let at = |fx: f32, fy: f32| {
+                    Pos2::new(
+                        image_rect.min.x + fx * image_rect.width(),
+                        image_rect.min.y + fy * image_rect.height(),
+                    )
+                };
+                let outline = egui::Rect::from_min_max(at(x0, y0), at(x1, y1));
+                let painter = ui.painter_at(*image_rect);
+                painter.rect_stroke(
+                    outline,
+                    0.0,
+                    Stroke::new(2.5, Color32::from_black_alpha(140)),
+                    egui::StrokeKind::Outside,
+                );
+                painter.rect_stroke(
+                    outline,
+                    0.0,
+                    Stroke::new(1.5, Color32::from_rgb(230, 120, 60)),
+                    egui::StrokeKind::Outside,
+                );
+            }
         }
     }
 }
@@ -2304,6 +2425,9 @@ impl eframe::App for App {
                 if i.key_pressed(egui::Key::I) {
                     self.show_filmstrip = !self.show_filmstrip;
                 }
+                if i.key_pressed(egui::Key::C) {
+                    self.compare = self.compare.next();
+                }
                 if i.key_pressed(egui::Key::F) {
                     // Focus mode: hide everything, or bring everything back.
                     let any = self.show_browser
@@ -2329,7 +2453,11 @@ impl eframe::App for App {
                 self.step_image(-1);
             }
             if o {
-                self.show_original = !self.show_original;
+                self.compare = if self.compare == Compare::Original {
+                    Compare::Treated
+                } else {
+                    Compare::Original
+                };
             }
             if d {
                 self.detail_enabled = !self.detail_enabled;
@@ -2388,6 +2516,10 @@ impl eframe::App for App {
             .size_range(80.0..=300.0)
             .show_collapsible(ui, &mut show_gallery, |ui| self.gallery(ui));
         self.show_gallery = show_gallery;
+        egui::Panel::bottom("toolbar")
+            .resizable(false)
+            .exact_size(34.0)
+            .show(ui, |ui| self.toolbar(ui));
         // The photo sits on the darker canvas colour, as in LightCraft.
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).fill(tokens.canvas))
@@ -2449,33 +2581,52 @@ impl eframe::App for App {
                             egui::RichText::new("Drag here, or click the photo, to move the area").small().weak(),
                         );
                     });
-                    match &self.detail {
-                        Some(tex) => {
-                            // Texture pixels → points so the zoom is exact on any display.
-                            let size = tex.size_vec2() * f32::from(self.detail_texture_zoom) / ppp;
-                            let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
-                            let [x0, y0, x1, y1] = self.detail_area.unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                            let frac = Vec2::new((x1 - x0) / size.x, (y1 - y0) / size.y);
-                            // Until the render for the current centre arrives, slide the one
-                            // on screen by the difference, clipped to the view.
-                            let (tc, c) = (self.detail_texture_centre, self.detail_centre);
-                            let shift = Vec2::new((tc[0] - c[0]) / frac.x, (tc[1] - c[1]) / frac.y);
-                            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                            ui.painter()
-                                .with_clip_rect(rect)
-                                .image(tex.id(), rect.translate(shift), uv, Color32::WHITE);
-                            if response.dragged() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                                drag = Some((response.drag_delta(), frac, [x1 - x0, y1 - y0]));
-                            } else if response.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                            }
-                            response.on_hover_text("Drag to move the area you're inspecting");
-                        }
-                        None => {
-                            ui.allocate_ui(egui::vec2(DETAIL_VIEW_PT, DETAIL_VIEW_PT), |ui| ui.spinner());
-                        }
+                    // The panes the image area shows: the original, the treated crop, or both.
+                    let mut panes: Vec<(&TextureHandle, Option<&str>)> = Vec::new();
+                    let side = self.compare == Compare::SideBySide;
+                    if self.compare.shows_original()
+                        && let Some(tex) = &self.detail_original
+                    {
+                        panes.push((tex, side.then_some("Original")));
                     }
+                    if self.compare.shows_treated()
+                        && let Some(tex) = &self.detail
+                    {
+                        panes.push((tex, side.then_some("Treated")));
+                    }
+                    if panes.is_empty() {
+                        ui.allocate_ui(egui::vec2(DETAIL_VIEW_PT, DETAIL_VIEW_PT), |ui| ui.spinner());
+                        return;
+                    }
+                    ui.horizontal_top(|ui| {
+                        for (tex, caption) in panes {
+                            ui.vertical(|ui| {
+                                if let Some(caption) = caption {
+                                    ui.label(egui::RichText::new(caption).small().weak());
+                                }
+                                // Texture pixels → points so the zoom is exact on any display.
+                                let size = tex.size_vec2() * f32::from(self.detail_texture_zoom) / ppp;
+                                let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
+                                let [x0, y0, x1, y1] = self.detail_area.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                                let frac = Vec2::new((x1 - x0) / size.x, (y1 - y0) / size.y);
+                                // Until the render for the current centre arrives, slide the one
+                                // on screen by the difference, clipped to the view.
+                                let (tc, c) = (self.detail_texture_centre, self.detail_centre);
+                                let shift = Vec2::new((tc[0] - c[0]) / frac.x, (tc[1] - c[1]) / frac.y);
+                                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                                ui.painter()
+                                    .with_clip_rect(rect)
+                                    .image(tex.id(), rect.translate(shift), uv, Color32::WHITE);
+                                if response.dragged() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                                    drag = Some((response.drag_delta(), frac, [x1 - x0, y1 - y0]));
+                                } else if response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                }
+                                response.on_hover_text("Drag to move the area you're inspecting");
+                            });
+                        }
+                    });
                 });
             if let Some((delta, frac, [w, h])) = drag
                 && delta != Vec2::ZERO
@@ -2535,6 +2686,7 @@ impl eframe::App for App {
         let flag_str = |b: bool| if b { "1" } else { "0" }.to_string();
         storage.set_string(KEY_BROWSER_BITMAPS, flag_str(self.browser_filter.bitmaps));
         storage.set_string(KEY_UPDATE_AUTO, flag_str(self.update_auto));
+        storage.set_string(KEY_SHOW_INFO, flag_str(self.show_info));
         storage.set_string(KEY_UPDATE_LAST, self.update_last_check.to_string());
         storage.set_string(
             KEY_UPDATE_SKIPPED,

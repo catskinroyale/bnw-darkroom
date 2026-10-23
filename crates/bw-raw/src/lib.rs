@@ -337,15 +337,32 @@ pub fn open(path: &Path) -> Result<RawPhoto, RawFileError> {
     })
 }
 
-/// The camera's embedded JPEG preview as RGBA, reduced to fit `max_edge` (for thumbnails).
+/// The camera's embedded JPEG preview as RGBA, reduced to fit `max_edge` (for thumbnails),
+/// turned upright. The preview is stored as the sensor saw it, so the raw file's own
+/// orientation tag (read from its headers, without decoding the samples) is applied.
 pub fn thumbnail(path: &Path, max_edge: u32) -> Option<(usize, usize, Vec<u8>)> {
     let bytes = std::fs::read(path).ok()?;
     let jpeg = lightcraft_raw::embedded_preview(&bytes)?;
     let img = image::load_from_memory(&jpeg)
         .ok()?
-        .thumbnail(max_edge, max_edge)
-        .to_rgba8();
+        .thumbnail(max_edge, max_edge);
+    let orientation = lightcraft_raw::probe_info(&bytes)
+        .map(|info| info.orientation)
+        .unwrap_or(Orientation::Normal);
+    let img = orient(img, orientation).to_rgba8();
     Some((img.width() as usize, img.height() as usize, img.into_raw()))
+}
+
+/// `img` turned as the EXIF `orientation` says: mirror, then quarter turns clockwise.
+fn orient(img: image::DynamicImage, orientation: Orientation) -> image::DynamicImage {
+    let (flip, turns) = exif_transform(orientation);
+    let img = if flip { img.fliph() } else { img };
+    match turns {
+        1 => img.rotate90(),
+        2 => img.rotate180(),
+        3 => img.rotate270(),
+        _ => img,
+    }
 }
 
 impl RawPhoto {
@@ -529,6 +546,22 @@ mod tests {
         ] {
             assert_eq!(exif_transform(o), expected);
         }
+    }
+
+    #[test]
+    fn portrait_thumbnails_are_turned_upright() {
+        // A landscape preview of a camera held for a portrait: the top-left pixel is marked.
+        let mut img = image::RgbaImage::new(3, 2);
+        img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        let img = image::DynamicImage::ImageRgba8(img);
+        let upright = orient(img.clone(), Orientation::Rotate90).to_rgba8();
+        assert_eq!(upright.dimensions(), (2, 3));
+        // Turned clockwise, the top-left corner moves to the top right.
+        assert_eq!(upright.get_pixel(1, 0).0, [255, 0, 0, 255]);
+        assert_eq!(
+            orient(img, Orientation::Normal).to_rgba8().dimensions(),
+            (3, 2)
+        );
     }
 
     #[test]

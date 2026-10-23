@@ -19,6 +19,11 @@ use crate::widgets::{self, Icon, paint_icon};
 const ROW_HEIGHT: f32 = 29.0;
 /// Indent per tree level.
 const INDENT: f32 = 16.0;
+/// Row layout from the panel's left edge: the chevron's centre lines up with the
+/// Folders header's chevron, and each level indents by one icon.
+const CHEVRON_X: f32 = 22.0;
+const ICON_X: f32 = 32.0;
+const LABEL_X: f32 = 54.0;
 /// Deepest level the tree opens to.
 const MAX_DEPTH: usize = 12;
 
@@ -131,7 +136,7 @@ impl Tree<'_> {
         let mut chevron_clicked = false;
         if has_children {
             let t = Tokens::get(ui.ctx());
-            let c = pos2(rect.left() + 10.0 + indent, rect.center().y);
+            let c = pos2(rect.left() + CHEVRON_X + indent, rect.center().y);
             let hit = Rect::from_center_size(c, vec2(16.0, 16.0));
             let tri = ui.interact(hit, open_id.with("chevron"), Sense::click());
             let colour = if tri.hovered() { t.text } else { t.text_dim };
@@ -212,7 +217,7 @@ fn row(
     paint_icon(
         ui.painter(),
         Rect::from_min_size(
-            pos2(r.left() + 18.0 + indent, r.center().y - 8.0),
+            pos2(r.left() + ICON_X + indent, r.center().y - 8.0),
             vec2(16.0, 16.0),
         ),
         icon,
@@ -220,7 +225,7 @@ fn row(
     );
     let font = t.font(13.5);
     let colour = if selected { t.text } else { t.text_label };
-    let left = r.left() + 42.0 + indent;
+    let left = r.left() + LABEL_X + indent;
     let room = (r.right() - 16.0 - left).max(0.0);
     let measure = |s: &str| {
         ui.painter()

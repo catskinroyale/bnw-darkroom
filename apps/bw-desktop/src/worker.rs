@@ -87,6 +87,8 @@ pub enum Msg {
     Detail {
         generation: u64,
         image: egui::ColorImage,
+        /// The same crop before black-and-white development, for side-by-side comparison.
+        original: egui::ColorImage,
         /// The crop's area as fractions of the image: `[x0, y0, x1, y1]`.
         area: [f32; 4],
     },
@@ -298,6 +300,7 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                         Ok(r) => Msg::Detail {
                             generation,
                             image: gray_image(&r.print),
+                            original: colour_image(&crop),
                             area,
                         },
                         Err(e) => Msg::RenderFailed {

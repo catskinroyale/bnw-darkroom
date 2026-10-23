@@ -5,6 +5,34 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Side-by-side comparison.** A toolbar of icons between the photo and the style gallery
+  switches the image area between **Treated** (a filled frame; the default), **Side by
+  side** (two frames: original and treated next to each other) and **Original** (an
+  empty frame). Clicking **Side by side** again goes back
+  to Treated, and **C** steps through the three views. The Detail window follows the view,
+  so side by side it shows the original and treated crops together, at 100% or 200%, and
+  dragging moves both.
+
+### Changed
+- **A tidier top bar.** The folder tree is shown and hidden with a sidebar icon at the far
+  left. A single theme icon at the far right steps through Auto, Light and Dark. The
+  "BW Darkroom" title (already in the window's title bar), the **Export…** button and the
+  **Workflow** toggle (both in the tool strip) and **Open folder…** (now **Browse
+  Folder…** in the folder tree) are gone.
+- **Show original** and **Detail 1:1** moved from above the photo to the new toolbar.
+  Detail is now a magnifying-glass icon, and a book icon shows or hides the file name and
+  capture details beside it.
+
+### Fixed
+- **Portrait photos are upright in the image strip.** Raw thumbnails come from the camera's
+  embedded preview, which is stored sideways; the raw file's orientation tag is now
+  applied. JPEG, TIFF and PNG files also follow their EXIF orientation, in thumbnails and
+  when opened. (A rendered file you had already turned with **Rotate** may need turning
+  back.)
+- Folder tree rows line up with the **Folders** header: chevrons under its chevron, and
+  each level indented by one icon.
+
 ## [0.8.0] - 2026-10-23
 
 ### Changed
@@ -20,7 +48,7 @@ All notable changes to this project are recorded here. The format follows
 - Apps and other macOS packages (`.app`, Photos and Lightroom libraries, and so on) are no
   longer listed as folders.
 - Thumbnails are decoded larger, so they stay sharp in the image strip.
-- The README screenshot shows the 0.7 interface.
+- The README screenshot shows the 0.9 interface, side by side.
 
 ### Removed
 - The file list's **Up** button and **Thumbs** option; the folder tree and image strip

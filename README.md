@@ -1,6 +1,6 @@
 # BW Darkroom
 
-![BW Darkroom: a raw photo of an arched stone doorway rendered as Tri-X developed in D-76, with the file browser, the Develop panel and its accordion sections, the tool strip and the style gallery](docs/images/screenshot.jpg)
+![BW Darkroom: a raw photo of an arched stone doorway shown side by side, the colour original next to the print rendered as Tri-X developed in D-76, with the folder tree, the comparison toolbar, the style gallery, the image strip, the Develop panel and the tool strip](docs/images/screenshot.jpg)
 
 A black-and-white photographic emulation engine in Rust, with a command-line tool and a
 desktop app. Film, developer and processing are modelled as separate components that

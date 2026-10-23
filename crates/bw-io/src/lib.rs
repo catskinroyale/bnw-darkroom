@@ -52,11 +52,26 @@ fn to_u8(v: f32) -> u8 {
     (v * 255.0 + 0.5) as u8
 }
 
+/// Open an image and turn it upright as its EXIF orientation says (portrait photos from
+/// cameras and phones are often stored sideways with an orientation tag).
+pub fn open_upright(path: &Path) -> image::ImageResult<DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(path)?
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    Ok(img)
+}
+
 pub fn load_scene(
     path: &Path,
     encoding: Encoding,
 ) -> Result<SceneImage, Box<dyn std::error::Error + Send + Sync>> {
-    let img = image::open(path)?;
+    let img = open_upright(path)?;
     let eight_bit = matches!(
         img,
         DynamicImage::ImageLuma8(_)
@@ -92,7 +107,7 @@ pub fn load_scene(
 
 /// Small sRGB RGBA thumbnail for browsing, `(width, height, pixels)`.
 pub fn load_thumbnail(path: &Path, max_edge: u32) -> image::ImageResult<(usize, usize, Vec<u8>)> {
-    let thumb = image::open(path)?.thumbnail(max_edge, max_edge).to_rgba8();
+    let thumb = open_upright(path)?.thumbnail(max_edge, max_edge).to_rgba8();
     Ok((
         thumb.width() as usize,
         thumb.height() as usize,

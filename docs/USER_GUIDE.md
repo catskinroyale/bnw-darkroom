@@ -69,9 +69,10 @@ installed without you.
 
 | Area | What it's for |
 |---|---|
-| **Top bar** | Show or hide panels (**Folders**, **Workflow**, **Gallery**, **Images**), **Open folder…**, **Export…**, and the theme (**Auto**, **Light**, **Dark**). |
+| **Top bar** | The sidebar icon (far left) shows or hides the folder tree; **Gallery** and **Images** show or hide the strips under the photo. The theme icon (far right) steps through **Auto**, **Light** and **Dark**. The Develop/Styles panel and Export are in the tool strip. |
 | **Folders** (left) | A tree of folders: choose the one you're working in. |
-| **Image** (centre) | The selected photo rendered with the current style. |
+| **Image** (centre) | The selected photo rendered with the current style, or compared with the original. |
+| **Toolbar** (under the photo) | Icons for the **Treated**, **Side by side** and **Original** views, **Detail 1:1** (magnifying glass), and a book that shows or hides the file name and capture details. |
 | **Tool strip** (far right) | Icons that choose the panel beside it: **Develop** and **Styles** at the top, **Export** and **About** at the bottom. Click the active icon again to hide the panel. |
 | **Develop** panel (right) | The style picker and the Image, Film, Development, Grain and Print sections. |
 | **Styles** panel (right) | Every style, in groups. |
@@ -99,7 +100,7 @@ pick a photo from the **Images** strip under the photo.
 - The tree starts from **Pictures**, **Desktop**, **Home** and any memory card or
   external drive. Click a folder to show its photos in the strip; click the chevron beside
   it to show or hide its subfolders. The tree opens down to the folder you're in.
-- **Browse Folder…** at the end of the tree, or **Open folder…** in the top bar, picks
+- **Browse Folder…** at the end of the tree picks
   any folder, such as one on a network drive. Right-click a folder for **Show in Finder**.
 - Apps and other macOS packages (`.app`, Photos and Lightroom libraries) aren't listed.
 - In the strip, long file names are shortened in the middle, keeping the start and the
@@ -131,7 +132,15 @@ not to the style. They're saved next to it and come back when you reopen it.
   detail where the sensor clipped; **Clip** renders clipped areas as plain white.
 - **Rotate ← / Rotate →**, and **Reset** to return to the camera's settings.
 
-**Show original (O)** shows the photo before black-and-white conversion.
+**Comparing with the original.** The toolbar under the photo has three views:
+
+- **Treated** (filled frame, the default): the photo as printed with the current style.
+- **Side by side** (two frames): the original and the treated photo next to each other.
+  Click it again to go back to Treated.
+- **Original** (empty frame): the photo before black-and-white development, with your
+  Image adjustments.
+
+**C** steps through the three views; **O** switches between Original and Treated.
 
 ## Choosing a style
 
@@ -230,13 +239,16 @@ The defaults are exactly the film's own grain. When you change them, the readout
 
 ## Checking detail at 100% and 200%
 
-Grain and edge effects only show properly at full resolution. Press **D** (or tick
-**Detail 1:1**) and click the image to choose the area. An orange outline shows what the
+Grain and edge effects only show properly at full resolution. Press **D** (or click the
+magnifying glass in the toolbar) and click the image to choose the area. An orange outline shows what the
 Detail window displays.
 
 - **100%** shows one image pixel per screen pixel: the export at full size, with
   exactly the grain the export will have.
 - **200%** magnifies two times, for judging grain structure.
+
+The Detail window shows what the image area shows: in **Side by side** it holds the
+original and treated crops next to each other, at the same zoom and moving together.
 
 The Detail window updates first whenever you change a setting, so you can fine-tune
 development and grain while watching it. A small spinner shows while it catches up.
@@ -322,7 +334,8 @@ field.
 | Key | Action |
 |---|---|
 | **← → ↑ ↓** | Previous / next photo |
-| **O** | Show the original |
+| **C** | Treated → Side by side → Original |
+| **O** | Original on or off |
 | **D** | Detail window on or off |
 | **B** | Show or hide the folder tree |
 | **W** | Show or hide the Develop / Styles panel |
