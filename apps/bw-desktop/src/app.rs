@@ -29,6 +29,7 @@ const KEY_FOLDER: &str = "folder";
 const KEY_MODULE: &str = "right_module";
 const KEY_THEME: &str = "theme";
 const KEY_SHOW_INFO: &str = "show_info";
+const KEY_GALLERY_SCALE: &str = "gallery_scale";
 const KEY_BROWSER_BITMAPS: &str = "browser_bitmaps";
 const KEY_BROWSER_JPEGS: &str = "browser_jpegs";
 const KEY_UPDATE_AUTO: &str = "update_auto";
@@ -212,6 +213,32 @@ enum UpdateDialog {
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
+/// Height of a style-gallery preview at the smallest size, in points; the size slider
+/// scales it up to twice this.
+const GALLERY_TILE_H: f32 = 104.0;
+/// Margin each side of the style previews in their column.
+const GALLERY_MARGIN: f32 = 10.0;
+
+/// Width of the style gallery column for previews `tile_w` wide: the previews, their
+/// margins and room for the scroll bar, and never too narrow for the size slider.
+fn gallery_width(tile_w: f32) -> f32 {
+    (tile_w + 2.0 * GALLERY_MARGIN + 6.0).max(130.0)
+}
+
+/// The style gallery's preview size, as a percentage of the smallest.
+const GALLERY_SIZE: widgets::SliderSpec = widgets::SliderSpec {
+    id: "gallery.size",
+    label: "Size",
+    help: "Size of the style previews, from the smallest (100%) to twice that (200%).",
+    min: 100.0,
+    max: 200.0,
+    default: 100.0,
+    step: 5.0,
+    decimals: 0,
+    suffix: "%",
+    signed: false,
+    log: false,
+};
 /// Side of the detail window's image area, in points.
 const DETAIL_VIEW_PT: f32 = 512.0;
 
@@ -279,6 +306,8 @@ pub struct App {
     compare: Compare,
     /// The toolbar shows the file name and capture details.
     show_info: bool,
+    /// Style-gallery preview size, 1 (smallest) to 2 (twice as large).
+    gallery_scale: f32,
 
     show_browser: bool,
     show_styles: bool,
@@ -441,6 +470,9 @@ impl App {
             preview_ms: None,
             compare: Compare::Treated,
             show_info: get(KEY_SHOW_INFO).is_none_or(|v| v != "0"),
+            gallery_scale: get(KEY_GALLERY_SCALE)
+                .and_then(|v| v.parse::<f32>().ok())
+                .map_or(1.0, |v| v.clamp(1.0, 2.0)),
             show_browser: panels[0],
             show_styles: panels[1],
             show_gallery: panels[2],
@@ -1537,8 +1569,6 @@ impl App {
                 self.about.open = true;
             }
             ui.separator();
-            ui.toggle_value(&mut self.show_gallery, "Gallery")
-                .on_hover_text("Show or hide the style gallery: this photo in every style (G)");
             ui.toggle_value(&mut self.show_filmstrip, "Images")
                 .on_hover_text("Show or hide the strip of photos in the chosen folder (I)");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2123,88 +2153,130 @@ impl App {
         }
     }
 
+    /// Size of a style preview in the photo's shape: [`GALLERY_TILE_H`] × the size setting
+    /// tall (very wide panoramas are capped at twice that in width).
+    fn gallery_tile_size(&self) -> Vec2 {
+        let shape = self
+            .tiles
+            .iter()
+            .find_map(|t| match t {
+                Tile::Ready(tex) => Some(tex.size_vec2()),
+                _ => None,
+            })
+            .or_else(|| self.original.as_ref().map(|t| t.size_vec2()))
+            .unwrap_or(Vec2::new(3.0, 2.0));
+        let h = GALLERY_TILE_H * self.gallery_scale;
+        let aspect = (shape.x / shape.y).clamp(0.2, 5.0);
+        let w = (h * aspect).min(2.0 * h);
+        Vec2::new(w, w / aspect)
+    }
+
+    /// The style gallery column: the photo in every style, one preview above another,
+    /// with the preview-size slider at its base.
     fn gallery(&mut self, ui: &mut egui::Ui) {
         let mut pick = None;
         let mut menu_action = None;
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Styles").strong())
-                .on_hover_text("The photo above rendered in every style. Click one to use it.");
-            ui.label(
-                egui::RichText::new("this photo in every style")
-                    .small()
-                    .weak(),
-            );
-        });
-        egui::ScrollArea::horizontal()
-            .auto_shrink([false, true])
+        // Fill the column: egui reserves only the width a fixed-size panel's contents use,
+        // and the narrow previews would let the photo's panels overlap the slider.
+        ui.set_min_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        // Every preview shows the same photo, so all share its shape.
+        let size = self.gallery_tile_size();
+        let accent = Tokens::get(ui.ctx()).accent;
+        // The slider keeps its place at the base; the previews scroll above it.
+        let slider_h = 52.0;
+        let list_h = (ui.available_height() - slider_h).max(0.0);
+        egui::ScrollArea::vertical()
+            .max_height(list_h)
+            .min_scrolled_height(list_h)
+            .auto_shrink(false)
             .show(ui, |ui| {
-                let tile_h = (ui.available_height() - 22.0).clamp(50.0, 260.0);
-                let size = Vec2::new(tile_h * 1.5, tile_h);
-                ui.horizontal(|ui| {
+                ui.vertical_centered(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
                     for (i, entry) in self.store.entries.iter().enumerate() {
-                        ui.vertical(|ui| {
-                            ui.set_width(size.x);
-                            let response = match self.tiles.get(i) {
-                                Some(Tile::Ready(tex)) => ui.add(
-                                    egui::Image::new(tex)
-                                        .fit_to_exact_size(size)
-                                        .maintain_aspect_ratio(true)
-                                        .sense(Sense::click()),
-                                ),
-                                Some(Tile::Unavailable) => {
-                                    let (rect, response) =
-                                        ui.allocate_exact_size(size, Sense::click());
-                                    ui.put(
-                                        rect,
-                                        egui::Label::new(
-                                            egui::RichText::new("No published time").small().weak(),
-                                        ),
+                        let selected = i == self.current;
+                        ui.add_space(6.0);
+                        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                        let response = match self.tiles.get(i) {
+                            Some(Tile::Ready(tex)) => {
+                                let t = tex.size_vec2();
+                                let scale = (size.x / t.x).min(size.y / t.y);
+                                let shown = egui::Rect::from_center_size(rect.center(), t * scale);
+                                egui::Image::new(tex).paint_at(ui, shown);
+                                if selected {
+                                    ui.painter().rect_stroke(
+                                        shown.expand(2.0),
+                                        2.0,
+                                        Stroke::new(2.0, accent),
+                                        egui::StrokeKind::Outside,
                                     );
-                                    response.on_hover_text(
-                                        "This film and developer have no published development time, so the style can't be rendered.",
-                                    )
                                 }
-                                _ => {
-                                    let (rect, response) =
-                                        ui.allocate_exact_size(size, Sense::click());
-                                    if self.loaded.is_some() {
-                                        ui.put(rect, egui::Spinner::new());
-                                    }
-                                    response
-                                }
-                            };
-                            let text = egui::RichText::new(&entry.style.name).small();
-                            let text = if i == self.current {
-                                text.strong()
-                            } else {
-                                text
-                            };
-                            ui.add(egui::Label::new(text).truncate());
-                            if i == self.current {
-                                ui.painter().rect_stroke(
-                                    response.rect.expand(2.0),
-                                    2.0,
-                                    Stroke::new(2.0, ui.visuals().selection.bg_fill),
-                                    egui::StrokeKind::Outside,
+                                response
+                            }
+                            Some(Tile::Unavailable) => {
+                                ui.put(
+                                    rect,
+                                    egui::Label::new(
+                                        egui::RichText::new("No published time").small().weak(),
+                                    ),
                                 );
+                                response.on_hover_text(
+                                    "This film and developer have no published development time, so the style can't be rendered.",
+                                )
                             }
-                            let response = response.on_hover_text(format!(
-                                "{} (right-click for options)",
-                                entry.style.name
-                            ));
-                            if response.clicked() {
-                                pick = Some(i);
-                            }
-                            let (up, down) = (self.store.can_move(i, -1), self.store.can_move(i, 1));
-                            response.context_menu(|ui| {
-                                if let Some(a) = style_menu::items(ui, i, entry.builtin, up, down) {
-                                    menu_action = Some(a);
+                            _ => {
+                                if self.loaded.is_some() {
+                                    ui.put(rect, egui::Spinner::new());
                                 }
-                            });
+                                response
+                            }
+                        };
+                        let text = egui::RichText::new(&entry.style.name).small();
+                        let text = if selected { text.strong() } else { text };
+                        // The name wraps within the preview's width, centred under it.
+                        ui.allocate_ui(Vec2::new(size.x, 0.0), |ui| {
+                            ui.set_max_width(size.x);
+                            ui.vertical_centered(|ui| ui.add(egui::Label::new(text).wrap()));
+                        });
+                        let response = response.on_hover_text(format!(
+                            "{}: the photo in this style. Click to use it; right-click for options.",
+                            entry.style.name
+                        ));
+                        if response.clicked() {
+                            pick = Some(i);
+                        }
+                        let (up, down) = (self.store.can_move(i, -1), self.store.can_move(i, 1));
+                        response.context_menu(|ui| {
+                            if let Some(a) = style_menu::items(ui, i, entry.builtin, up, down) {
+                                menu_action = Some(a);
+                            }
                         });
                     }
+                    ui.add_space(6.0);
                 });
             });
+        widgets::divider(ui);
+        ui.add_space(4.0);
+        // The Develop panel's slider row, with its wide inset drawn into the column's
+        // margins so the track lines up with the previews.
+        let cursor = ui.cursor().min;
+        let panel = ui.clip_rect();
+        let row = egui::Rect::from_min_max(
+            Pos2::new(panel.left() + GALLERY_MARGIN - widgets::PAD_L, cursor.y),
+            Pos2::new(
+                panel.right() - GALLERY_MARGIN + widgets::PAD_R,
+                panel.bottom(),
+            ),
+        );
+        let mut percent = f64::from(self.gallery_scale) * 100.0;
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(row));
+        if widgets::slider(&mut child, &GALLERY_SIZE, &mut percent, true) {
+            self.gallery_scale = (percent / 100.0) as f32;
+        }
+        // Reserve the row within the column: counting the margin it is drawn into would
+        // move the column's edge.
+        let height = child.min_rect().height();
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
         if let Some(i) = pick {
             self.select_style(i);
         }
@@ -2218,6 +2290,17 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            if widgets::icon_button(
+                ui,
+                Icon::Grid,
+                self.show_gallery,
+                "Show or hide the style previews: this photo in every style (G)",
+            )
+            .clicked()
+            {
+                self.show_gallery = !self.show_gallery;
+            }
+            ui.separator();
             for (mode, icon, help) in [
                 (
                     Compare::Treated,
@@ -2479,6 +2562,17 @@ impl eframe::App for App {
             .size_range(160.0..=420.0)
             .show_collapsible(ui, &mut show_browser, |ui| self.browser_panel(ui));
         self.show_browser = show_browser;
+        // The style gallery: a column beside the folder tree, as wide as its previews.
+        let mut show_gallery = self.show_gallery;
+        let gallery_w = gallery_width(self.gallery_tile_size().x);
+        egui::Panel::left("style_column")
+            .frame(
+                egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(0, 4)),
+            )
+            .resizable(false)
+            .exact_size(gallery_w)
+            .show_collapsible(ui, &mut show_gallery, |ui| self.gallery(ui));
+        self.show_gallery = show_gallery;
         let tokens = Tokens::get(ctx);
         egui::Panel::right("tool_strip")
             .exact_size(48.0)
@@ -2501,7 +2595,7 @@ impl eframe::App for App {
                 Module::Styles => self.styles_panel(ui),
             });
         self.show_styles = show_styles;
-        // The image strip sits at the very bottom, the style gallery above it.
+        // The image strip sits at the very bottom, the toolbar above it.
         let mut show_filmstrip = self.show_filmstrip;
         egui::Panel::bottom("filmstrip")
             .resizable(true)
@@ -2509,13 +2603,6 @@ impl eframe::App for App {
             .size_range(90.0..=280.0)
             .show_collapsible(ui, &mut show_filmstrip, |ui| self.filmstrip(ui));
         self.show_filmstrip = show_filmstrip;
-        let mut show_gallery = self.show_gallery;
-        egui::Panel::bottom("gallery")
-            .resizable(true)
-            .default_size(120.0)
-            .size_range(80.0..=300.0)
-            .show_collapsible(ui, &mut show_gallery, |ui| self.gallery(ui));
-        self.show_gallery = show_gallery;
         egui::Panel::bottom("toolbar")
             .resizable(false)
             .exact_size(34.0)
@@ -2687,6 +2774,7 @@ impl eframe::App for App {
         storage.set_string(KEY_BROWSER_BITMAPS, flag_str(self.browser_filter.bitmaps));
         storage.set_string(KEY_UPDATE_AUTO, flag_str(self.update_auto));
         storage.set_string(KEY_SHOW_INFO, flag_str(self.show_info));
+        storage.set_string(KEY_GALLERY_SCALE, self.gallery_scale.to_string());
         storage.set_string(KEY_UPDATE_LAST, self.update_last_check.to_string());
         storage.set_string(
             KEY_UPDATE_SKIPPED,

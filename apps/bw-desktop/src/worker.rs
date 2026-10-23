@@ -24,7 +24,7 @@ use crate::export::{Conflict, Format, resolve_conflict};
 use crate::source::Source;
 
 /// Long edge of style-gallery tiles.
-pub const TILE_EDGE: usize = 360;
+pub const TILE_EDGE: usize = 480;
 /// Pixel rectangle `(x, y, width, height)` of a detail crop of `size` pixels centred on
 /// `centre` (0–1 across the image), moved inwards where it would cross an edge.
 pub fn detail_rect(

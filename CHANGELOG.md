@@ -6,7 +6,17 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Changed
-- The README screenshot's folder tree shows only neutral example folders.
+- **The style gallery is a column on the left**, beside the folder tree, so larger
+  previews no longer take height from the photo. Previews are twice their earlier size,
+  in the photo's own shape, with their names wrapped to the preview's width beneath. The
+  column fits snugly around them. A **Size** slider at the column's base (styled like the
+  Develop panel's sliders) makes them up to twice as large again; the column's width
+  follows it and the size is remembered. The previews are rendered larger to stay
+  sharp. The image strip stays at the bottom.
+- The style column is shown and hidden with a grid icon at the left of the toolbar
+  (or **G**), instead of the **Gallery** button in the top bar.
+- The README screenshot shows the style column, and its folder tree shows only neutral
+  example folders.
 
 ## [0.9.0] - 2026-10-23
 

@@ -69,14 +69,14 @@ installed without you.
 
 | Area | What it's for |
 |---|---|
-| **Top bar** | The sidebar icon (far left) shows or hides the folder tree; **Gallery** and **Images** show or hide the strips under the photo. The theme icon (far right) steps through **Auto**, **Light** and **Dark**. The Develop/Styles panel and Export are in the tool strip. |
+| **Top bar** | The sidebar icon (far left) shows or hides the folder tree, and **Images** the strip under the photo. The theme icon (far right) steps through **Auto**, **Light** and **Dark**. The Develop/Styles panel and Export are in the tool strip. |
 | **Folders** (left) | A tree of folders: choose the one you're working in. |
 | **Image** (centre) | The selected photo rendered with the current style, or compared with the original. |
-| **Toolbar** (under the photo) | Icons for the **Treated**, **Side by side** and **Original** views, **Detail 1:1** (magnifying glass), and a book that shows or hides the file name and capture details. |
+| **Toolbar** (under the photo) | A grid icon that shows or hides the style column, then icons for the **Treated**, **Side by side** and **Original** views, **Detail 1:1** (magnifying glass), and a book that shows or hides the file name and capture details. |
 | **Tool strip** (far right) | Icons that choose the panel beside it: **Develop** and **Styles** at the top, **Export** and **About** at the bottom. Click the active icon again to hide the panel. |
 | **Develop** panel (right) | The style picker and the Image, Film, Development, Grain and Print sections. |
 | **Styles** panel (right) | Every style, in groups. |
-| **Styles** strip (bottom) | The current photo rendered with every style, to compare them at a glance. |
+| **Styles** column (left, beside the folders) | The current photo rendered with every style, to compare them at a glance. The **Size** slider at its base makes the previews up to twice as large (double-click it to reset). Show or hide it with the grid icon at the left of the toolbar. |
 | **Images** strip (very bottom) | The photos in the chosen folder: click one to open it. |
 
 The Develop panel's sections open and close with a click on their title, and remember how
@@ -339,7 +339,7 @@ field.
 | **D** | Detail window on or off |
 | **B** | Show or hide the folder tree |
 | **W** | Show or hide the Develop / Styles panel |
-| **G** | Show or hide the style gallery |
+| **G** | Show or hide the style column |
 | **I** | Show or hide the image strip |
 | **F** | Focus: hide or show all panels |
 | **⌘E** | Export |
