@@ -8,6 +8,10 @@ All notable changes to this project are recorded here. The format follows
 ### Changed
 - The README screenshot shows the 0.7 interface.
 
+### Added
+- `docs/decisions.md`: a log of product and scope decisions. First entry: the digital look
+  is deferred, and work concentrates on film, chemicals and paper.
+
 ## [0.7.1] - 2026-10-23
 
 ### Added

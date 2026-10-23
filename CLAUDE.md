@@ -1,7 +1,8 @@
 # Notes for Claude Code
 
 Working notes for AI-assisted sessions on BW Darkroom. Read alongside `README.md`, the
-user guide (`docs/USER_GUIDE.md`) and design 0001 (`docs/design/0001-negative-simulation-model.md`).
+user guide (`docs/USER_GUIDE.md`), design 0001 (`docs/design/0001-negative-simulation-model.md`)
+and the decision log (`docs/decisions.md`; record product and scope decisions there).
 
 ## What this is
 
