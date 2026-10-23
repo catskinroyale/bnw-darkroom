@@ -85,6 +85,12 @@ others may never repaint. Scripted clicks can rename/delete real user styles
   (`.claude/hooks/require-changelog.sh`) blocks `git push` otherwise; edit the changelog in
   a separate command before the push command.
 - End commit messages with the attribution line the session provides.
+- **Every release refreshes the README first** (the user's standing request): retake
+  `docs/images/screenshot.jpg` showing the current interface and update the README text
+  and image alt text to match, committed before `tools/release.sh`. Take the shot with
+  `HOME` set to a scratch folder holding only an approved photo (e.g.
+  `Pictures/Darkroom/DSC_6438.NEF` plus neutral empty folders) so the folder tree shows
+  nothing personal, then check the JPEG for names, paths or GPS (`strings`).
 - Release (version only in `[workspace.package]` of `Cargo.toml`):
   ```sh
   tools/release.sh patch|minor|major      # bumps version, dates the changelog, tags

@@ -17,6 +17,7 @@ All notable changes to this project are recorded here. The format follows
   (or **G**), instead of the **Gallery** button in the top bar.
 - The README screenshot shows the style column, and its folder tree shows only neutral
   example folders.
+- `CLAUDE.md`: every release now refreshes the README and its screenshot first.
 
 ## [0.9.0] - 2026-10-23
 
