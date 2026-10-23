@@ -21,10 +21,10 @@ interpretations (`docs/research/photographer-presets.md`).
 | `crates/bw-darkroom` | Printing (paper curve, black-point print exposure) |
 | `crates/bw-profiles` | `Style` (film + developer + process + print + grain), `render`, `render_region` |
 | `crates/bw-raw` | Raw input via LightCraft's `lightcraft-raw` (pinned git rev) |
-| `apps/bw-desktop` | egui app: `app.rs` (state, panels), `workflow.rs` (Develop sections), `image_panel.rs`, `widgets.rs` + `theme.rs` (LightCraft-derived UI), `updates.rs`, `worker.rs` (render thread) |
+| `apps/bw-desktop` | egui app: `app.rs` (state, panels, image strip), `folders.rs` (folder tree) + `browser.rs` (listing, places, packages), `workflow.rs` (Develop sections), `image_panel.rs`, `widgets.rs` + `theme.rs` (LightCraft-derived UI), `updates.rs`, `worker.rs` (render thread) |
 | `apps/bw-cli` | `bw variations` |
 
-Everything except `bw-core` is Apache-2.0. `theme.rs` and `widgets.rs` adapt LightCraft code
+Everything except `bw-core` is Apache-2.0. `theme.rs`, `widgets.rs` and `folders.rs` adapt LightCraft code
 (MIT, credited in each file and the About window); Inter is OFL. Never use ArtCraft branding.
 
 ## Commands
@@ -71,7 +71,7 @@ python3 -I tools/gen_licenses.py         # after dependency changes (About windo
 settings or touch the network. Options (env vars, prefix `BW_DARKROOM_SCREENSHOT_`):
 `FRESH=1` (default layout), `THEME=dark|light`, `VIEW=develop|styles`, `EDIT=1` (open all
 sections), `CLOSE=image,film`, `DETAIL=x,y,zoom`, `GRAIN=amount,size,roughness`,
-`THEN_PUSH=stops`, `THUMBS=0|1`, `SHOW=bitmaps,jpegs`, `STYLEMENU=index`, `ABOUT=1`,
+`THEN_PUSH=stops`, `SHOW=bitmaps,jpegs`, `STYLEMENU=index`, `ABOUT=1`,
 `EXPORT=1`, `UPDATE=version` + `UPDATE_DIALOG=1` (fake update), `WAIT=seconds`, and
 `CLICKS=t:x,y;t:x,y>x2,y2` (scripted clicks and drags through egui input; macOS blocks
 synthetic OS clicks). Run each shot with a time limit and retry: a window opened behind

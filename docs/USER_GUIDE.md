@@ -69,13 +69,14 @@ installed without you.
 
 | Area | What it's for |
 |---|---|
-| **Top bar** | Show or hide panels (**Files**, **Workflow**, **Gallery**), **Open folder…**, **Export…**, and the theme (**Auto**, **Light**, **Dark**). |
-| **Files** (left) | The folder you're working in. |
+| **Top bar** | Show or hide panels (**Folders**, **Workflow**, **Gallery**, **Images**), **Open folder…**, **Export…**, and the theme (**Auto**, **Light**, **Dark**). |
+| **Folders** (left) | A tree of folders: choose the one you're working in. |
 | **Image** (centre) | The selected photo rendered with the current style. |
 | **Tool strip** (far right) | Icons that choose the panel beside it: **Develop** and **Styles** at the top, **Export** and **About** at the bottom. Click the active icon again to hide the panel. |
 | **Develop** panel (right) | The style picker and the Image, Film, Development, Grain and Print sections. |
 | **Styles** panel (right) | Every style, in groups. |
-| **Gallery** (bottom) | The current photo rendered with every style, to compare them at a glance. |
+| **Styles** strip (bottom) | The current photo rendered with every style, to compare them at a glance. |
+| **Images** strip (very bottom) | The photos in the chosen folder: click one to open it. |
 
 The Develop panel's sections open and close with a click on their title, and remember how
 you left them. Advanced controls sit in expandable rows inside a section (for example
@@ -92,19 +93,24 @@ Hover over almost any control for a short explanation.
 
 ## Opening photos
 
-Use **Open folder…** or drag through folders in the **Files** panel.
+Choosing a photo takes two steps: pick a folder in the **Folders** tree on the left, then
+pick a photo from the **Images** strip under the photo.
 
-- **Up** goes to the parent folder; click a folder to open it.
-- Long file names are shortened in the middle, keeping the start and the frame number
-  ("Reykjav…042.NEF"). Hover a file to see its full name and a larger thumbnail.
-- **Thumbs** shows small thumbnails in the list instead of a compact text list.
+- The tree starts from **Pictures**, **Desktop**, **Home** and any memory card or
+  external drive. Click a folder to show its photos in the strip; click the chevron beside
+  it to show or hide its subfolders. The tree opens down to the folder you're in.
+- **Browse Folder…** at the end of the tree, or **Open folder…** in the top bar, picks
+  any folder, such as one on a network drive. Right-click a folder for **Show in Finder**.
+- Apps and other macOS packages (`.app`, Photos and Lightroom libraries) aren't listed.
+- In the strip, long file names are shortened in the middle, keeping the start and the
+  frame number ("Reykjav…042.NEF"). Hover a photo to see its full name.
 
 **Raw files first.** BW Darkroom is built for camera raw files: Nikon NEF, DNG (including
 Leica) and Sony ARW. They're always listed. JPEG, TIFF and PNG files are hidden unless you
-turn on **TIFF/PNG** or **JPEG** in the panel header. The count line tells you how many
+turn on **TIFF/PNG** or **JPEG** in the strip's header. The count tells you how many
 files are hidden.
 
-Use the arrow keys to step through the photos in the folder.
+Use the arrow keys to step through the photos in the folder; the strip follows.
 
 Nikon High Efficiency (HE/HE★) NEFs aren't supported; use lossless compressed NEF.
 
@@ -318,9 +324,10 @@ field.
 | **← → ↑ ↓** | Previous / next photo |
 | **O** | Show the original |
 | **D** | Detail window on or off |
-| **B** | Show or hide the file browser |
+| **B** | Show or hide the folder tree |
 | **W** | Show or hide the Develop / Styles panel |
-| **G** | Show or hide the gallery |
+| **G** | Show or hide the style gallery |
+| **I** | Show or hide the image strip |
 | **F** | Focus: hide or show all panels |
 | **⌘E** | Export |
 
@@ -345,7 +352,7 @@ supported.
 **A night photo looks washed out after Auto exposure.** Auto aims the average at
 mid-grey, which overexposes mostly dark scenes. Set **Exposure** by hand.
 
-**My JPEGs don't appear.** Turn on **JPEG** (or **TIFF/PNG**) in the Files panel header.
+**My JPEGs don't appear.** Turn on **JPEG** (or **TIFF/PNG**) in the image strip's header.
 
 **Licences and version.** BW Darkroom ▸ About BW Darkroom shows the version, the
 project's licences and every third-party component.

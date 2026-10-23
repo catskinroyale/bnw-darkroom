@@ -8,6 +8,7 @@ mod about;
 mod app;
 mod browser;
 mod export;
+mod folders;
 mod image_panel;
 #[cfg(target_os = "macos")]
 mod menu;

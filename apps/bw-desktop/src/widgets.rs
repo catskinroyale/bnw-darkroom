@@ -692,6 +692,12 @@ pub enum Icon {
     Curve,
     /// Colour temperature: a thermometer.
     Thermometer,
+    /// A folder in the folder tree.
+    Folder,
+    /// A mounted volume (memory card, external drive).
+    Drive,
+    /// Add (Browse Folder…).
+    Plus,
 }
 
 /// Paint `icon` in `rect`.
@@ -770,6 +776,29 @@ pub fn paint_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(11.5, 3.5), (11.5, 12.0)]);
             line(&[(8.5, 3.5), (11.5, 3.5)]);
             p.circle_stroke(at(10.0, 14.5), 3.0 * s, stroke);
+        }
+        Icon::Folder => line(&[
+            (2.5, 5.5),
+            (2.5, 15.5),
+            (17.5, 15.5),
+            (17.5, 7.0),
+            (9.5, 7.0),
+            (8.0, 4.5),
+            (3.5, 4.5),
+            (2.5, 5.5),
+        ]),
+        Icon::Drive => {
+            p.rect_stroke(
+                Rect::from_min_size(at(2.5, 6.0), vec2(15.0, 8.0) * s),
+                1.5,
+                stroke,
+                StrokeKind::Middle,
+            );
+            p.circle_filled(at(14.0, 10.0), 1.0 * s, color);
+        }
+        Icon::Plus => {
+            line(&[(10.0, 4.0), (10.0, 16.0)]);
+            line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
     }
 }

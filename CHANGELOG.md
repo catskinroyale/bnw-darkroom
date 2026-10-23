@@ -6,7 +6,23 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Finding a folder and choosing a photo are now separate.**
+  - **Folders** (left): a collapsible folder tree, following LightCraft's. It starts from
+    Pictures, Desktop, Home and any memory card or external drive, opens down to the
+    folder you're in, and ends with **Browse Folder…**. Click a folder to show its photos;
+    click its chevron to show or hide its subfolders. The tree lists folders only.
+  - **Images** (bottom): a sideways-scrolling strip of the chosen folder's photos. Click
+    one to open it. The **RAW**, **TIFF/PNG** and **JPEG** filters and the photo count
+    moved here. **I** shows or hides the strip; the arrow keys still step through it.
+  - The style gallery sits above the image strip, now labelled **Styles**.
+- Apps and other macOS packages (`.app`, Photos and Lightroom libraries, and so on) are no
+  longer listed as folders.
+- Thumbnails are decoded larger, so they stay sharp in the image strip.
 - The README screenshot shows the 0.7 interface.
+
+### Removed
+- The file list's **Up** button and **Thumbs** option; the folder tree and image strip
+  replace them.
 
 ### Added
 - `docs/decisions.md`: a log of product and scope decisions. First entry: the digital look

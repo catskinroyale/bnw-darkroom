@@ -1,8 +1,8 @@
 //! Application state and UI.
 //!
-//! Layout: folder browser (left), preview (centre), the Develop or Styles panel (right)
-//! chosen from an icon strip at the far right, and a style gallery showing the current
-//! image in every style (bottom). The panel design follows LightCraft's (see `theme` and
+//! Layout: folder tree (left), preview (centre), the Develop or Styles panel (right)
+//! chosen from an icon strip at the far right, and two strips under the photo: the style
+//! gallery showing the current image in every style, and the images of the chosen folder. The panel design follows LightCraft's (see `theme` and
 //! `widgets`).
 
 use std::collections::HashMap;
@@ -28,7 +28,6 @@ use bw_raw::RawAdjust;
 const KEY_FOLDER: &str = "folder";
 const KEY_MODULE: &str = "right_module";
 const KEY_THEME: &str = "theme";
-const KEY_BROWSER_THUMBS: &str = "browser_thumbs";
 const KEY_BROWSER_BITMAPS: &str = "browser_bitmaps";
 const KEY_BROWSER_JPEGS: &str = "browser_jpegs";
 const KEY_UPDATE_AUTO: &str = "update_auto";
@@ -184,8 +183,6 @@ enum UpdateDialog {
 const KEY_EXPORT_DIR: &str = "export_dir";
 const KEY_EXPORT: &str = "export_settings";
 const KEY_PANELS: &str = "panels";
-/// Thumbnail size in browser rows.
-const THUMB_ROW: f32 = 28.0;
 /// Side of the detail window's image area, in points.
 const DETAIL_VIEW_PT: f32 = 512.0;
 
@@ -209,9 +206,17 @@ pub struct App {
     msg_tx: Sender<Msg>,
     thumb_tx: Sender<ThumbRequest>,
 
+    /// The folder being browsed, and its images (the image strip).
     folder: PathBuf,
     entries: Vec<Entry>,
     thumbs: HashMap<PathBuf, TextureHandle>,
+    /// Subfolder listings for the folder tree.
+    folder_cache: browser::FolderCache,
+    /// The folder tree's top-level folders, and when they were last listed.
+    places: Vec<browser::Place>,
+    places_listed: std::time::Instant,
+    /// Scroll the image strip to the selected image on the next frame.
+    reveal_in_strip: bool,
 
     selected: Option<PathBuf>,
     image_generation: u64,
@@ -233,9 +238,7 @@ pub struct App {
     module: Module,
     /// Open every Develop section on the next frame ("Edit…" from a style's menu).
     open_all_sections: bool,
-    /// File browser shows thumbnails in its rows (otherwise a compact list).
-    browser_thumbs: bool,
-    /// Which non-raw files the browser lists (raw files always are).
+    /// Which non-raw files the image strip lists (raw files always are).
     browser_filter: browser::Filter,
     /// Long edge, in pixels, the preview is rendered at (follows the screen size).
     preview_edge: usize,
@@ -248,6 +251,7 @@ pub struct App {
     show_browser: bool,
     show_styles: bool,
     show_gallery: bool,
+    show_filmstrip: bool,
 
     detail_enabled: bool,
     detail_centre: [f32; 2],
@@ -320,7 +324,7 @@ impl App {
         let (msg_tx, msgs) = mpsc::channel();
         let (thumb_tx, thumb_rx) = mpsc::channel();
         worker::spawn_renderer(job_rx, msg_tx.clone(), ctx.clone());
-        browser::spawn_thumbnailer(thumb_rx, msg_tx.clone(), ctx);
+        browser::spawn_thumbnailer(thumb_rx, msg_tx.clone(), ctx.clone());
 
         let storage = cc.storage;
         let get = |key: &str| storage.and_then(|s| s.get_string(key));
@@ -344,11 +348,13 @@ impl App {
                 folder: get(KEY_EXPORT_DIR).map(PathBuf::from),
                 ..Default::default()
             });
-        // Panel visibility as three 0/1 flags: browser, styles, gallery.
-        let panels: Vec<bool> = get(KEY_PANELS)
+        // Panel visibility as 0/1 flags: folders, styles, gallery, image strip (older
+        // versions saved the first three).
+        let mut panels: Vec<bool> = get(KEY_PANELS)
             .map(|s| s.chars().map(|c| c == '1').collect())
-            .filter(|v: &Vec<bool>| v.len() == 3)
-            .unwrap_or_else(|| vec![true, true, true]);
+            .filter(|v: &Vec<bool>| v.len() == 3 || v.len() == 4)
+            .unwrap_or_default();
+        panels.resize(4, true);
 
         let store = StyleStore::load();
         let draft = store.entries[0].style.clone();
@@ -360,6 +366,10 @@ impl App {
             folder: PathBuf::new(),
             entries: Vec::new(),
             thumbs: HashMap::new(),
+            folder_cache: browser::FolderCache::new(ctx),
+            places: browser::places(),
+            places_listed: std::time::Instant::now(),
+            reveal_in_strip: false,
             selected: None,
             image_generation: 0,
             loaded: None,
@@ -375,7 +385,6 @@ impl App {
             draft,
             module,
             open_all_sections: false,
-            browser_thumbs: get(KEY_BROWSER_THUMBS).is_some_and(|v| v == "1"),
             update_auto: get(KEY_UPDATE_AUTO).is_none_or(|v| v != "0"),
             update_last_check: get(KEY_UPDATE_LAST)
                 .and_then(|v| v.parse().ok())
@@ -400,6 +409,7 @@ impl App {
             show_browser: panels[0],
             show_styles: panels[1],
             show_gallery: panels[2],
+            show_filmstrip: panels[3],
             detail_enabled: false,
             detail_centre: [0.5, 0.5],
             detail_zoom: 1,
@@ -464,7 +474,7 @@ impl App {
         let paths: Vec<PathBuf> = self
             .entries
             .iter()
-            .filter(|e| !e.is_dir && !self.thumbs.contains_key(&e.path))
+            .filter(|e| !self.thumbs.contains_key(&e.path))
             .map(|e| e.path.clone())
             .rev() // the thumbnailer pops from the end, so list order is load order
             .collect();
@@ -479,6 +489,7 @@ impl App {
         self.adjust = crate::source::load_adjust(&path);
         self.image_generation += 1;
         self.selected = Some(path.clone());
+        self.reveal_in_strip = true;
         self.loaded = None;
         self.loading = true;
         self.preview = None;
@@ -496,7 +507,7 @@ impl App {
         let images: Vec<&PathBuf> = self
             .entries
             .iter()
-            .filter(|e| !e.is_dir && self.browser_filter.shows(e.kind))
+            .filter(|e| self.browser_filter.shows(e.kind))
             .map(|e| &e.path)
             .collect();
         if images.is_empty() {
@@ -1397,11 +1408,7 @@ impl App {
         if let Some(view) = std::env::var_os("BW_DARKROOM_SCREENSHOT_VIEW") {
             self.module = Module::from_key(&view.to_string_lossy());
         }
-        // `BW_DARKROOM_SCREENSHOT_THUMBS=1|0` sets the file browser's thumbnail rows.
-        if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_THUMBS") {
-            self.browser_thumbs = v == "1";
-        }
-        // `BW_DARKROOM_SCREENSHOT_SHOW=bitmaps,jpegs` (or empty) sets the browser's filter.
+        // `BW_DARKROOM_SCREENSHOT_SHOW=bitmaps,jpegs` (or empty) sets the image strip's filter.
         if let Some(v) = std::env::var_os("BW_DARKROOM_SCREENSHOT_SHOW") {
             let v = v.to_string_lossy();
             self.browser_filter = browser::Filter {
@@ -1465,19 +1472,21 @@ impl App {
                 self.about.open = true;
             }
             ui.separator();
-            ui.toggle_value(&mut self.show_browser, "Files")
-                .on_hover_text("Show or hide the file browser (B)");
+            ui.toggle_value(&mut self.show_browser, "Folders")
+                .on_hover_text("Show or hide the folder tree (B)");
             ui.toggle_value(&mut self.show_styles, "Workflow")
                 .on_hover_text("Show or hide the styles and workflow panel (W)");
             ui.toggle_value(&mut self.show_gallery, "Gallery")
-                .on_hover_text("Show or hide the style gallery (G)");
+                .on_hover_text("Show or hide the style gallery: this photo in every style (G)");
+            ui.toggle_value(&mut self.show_filmstrip, "Images")
+                .on_hover_text("Show or hide the strip of photos in the chosen folder (I)");
             ui.separator();
-            if ui.button("Open folder…").clicked()
-                && let Some(folder) = rfd::FileDialog::new()
-                    .set_directory(&self.folder)
-                    .pick_folder()
+            if ui
+                .button("Open folder…")
+                .on_hover_text("Choose a folder; its photos appear in the strip below the image")
+                .clicked()
             {
-                self.open_folder(folder);
+                self.pick_folder();
             }
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1540,176 +1549,179 @@ impl App {
         });
     }
 
-    /// The file browser: a compact list by default (one text row per file, names
-    /// shortened in the middle so the frame number and extension stay visible, the file
-    /// type as a right-hand tag, the thumbnail on hover), or rows with thumbnails.
+    /// The folder tree. Choosing a folder fills the image strip; the tree never lists
+    /// files, so finding a folder and choosing a photo stay separate.
     fn browser_panel(&mut self, ui: &mut egui::Ui) {
-        let mut open: Option<PathBuf> = None;
-        let mut select: Option<PathBuf> = None;
-
-        ui.horizontal(|ui| {
-            if ui
-                .small_button("Up")
-                .on_hover_text("Parent folder")
-                .clicked()
-            {
-                open = self.folder.parent().map(|p| p.to_path_buf());
+        // Drives come and go (memory cards): list the places again now and then.
+        if self.places_listed.elapsed() >= std::time::Duration::from_secs(5) {
+            self.places = browser::places();
+            self.places_listed = std::time::Instant::now();
+        }
+        match crate::folders::show(ui, &self.folder_cache, &self.places, &self.folder) {
+            Some(crate::folders::Action::Browse(folder)) => {
+                if folder != self.folder {
+                    self.open_folder(folder);
+                }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.toggle_value(&mut self.browser_thumbs, egui::RichText::new("Thumbs").small())
-                    .on_hover_text("Show thumbnails in the list (taller rows). Off: compact list, thumbnail on hover.");
-                ui.add(egui::Label::new(egui::RichText::new(file_name(&self.folder)).strong()).truncate())
-                    .on_hover_text(self.folder.display().to_string());
-            });
-        });
-        // File types: raw is fixed on (the app is for raw files); the others are opt-in.
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add_enabled(
-                false,
-                egui::Button::selectable(true, egui::RichText::new("RAW").small()),
-            )
-            .on_disabled_hover_text("Camera raw files (NEF, DNG, ARW) are always listed");
-            ui.toggle_value(
-                &mut self.browser_filter.bitmaps,
-                egui::RichText::new("TIFF/PNG").small(),
-            )
-            .on_hover_text(
-                "Also list lossless bitmaps (TIFF, PNG), such as scans or edited masters",
-            );
-            ui.toggle_value(
-                &mut self.browser_filter.jpegs,
-                egui::RichText::new("JPEG").small(),
-            )
-            .on_hover_text("Also list compressed JPEG files");
-        });
+            Some(crate::folders::Action::PickFolder) => self.pick_folder(),
+            None => {}
+        }
+    }
+
+    fn pick_folder(&mut self) {
+        if let Some(folder) = rfd::FileDialog::new()
+            .set_directory(&self.folder)
+            .pick_folder()
+        {
+            self.open_folder(folder);
+        }
+    }
+
+    /// The image strip: the chosen folder's photos as thumbnails, scrolling sideways.
+    /// Clicking one opens it in the main view. The header names the folder, counts the
+    /// photos and sets which file types are listed.
+    fn filmstrip(&mut self, ui: &mut egui::Ui) {
         let filter = self.browser_filter;
-        let images = self
-            .entries
-            .iter()
-            .filter(|e| !e.is_dir && filter.shows(e.kind))
-            .count();
-        let folders = self.entries.iter().filter(|e| e.is_dir).count();
-        let hidden = self
-            .entries
-            .iter()
-            .filter(|e| !filter.shows(e.kind))
-            .count();
+        let images = self.entries.iter().filter(|e| filter.shows(e.kind)).count();
+        let hidden = self.entries.len() - images;
         let plural =
             |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-        let mut count = plural(images, "image", "images");
-        if folders > 0 {
-            count.push_str(&format!(" · {}", plural(folders, "folder", "folders")));
-        }
-        if hidden > 0 {
-            count.push_str(&format!(" · {hidden} hidden"));
-        }
-        ui.label(egui::RichText::new(count).small().weak());
-        let mut show_all = false;
-        ui.separator();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add(
+                egui::Label::new(egui::RichText::new(file_name(&self.folder)).strong()).truncate(),
+            )
+            .on_hover_text(self.folder.display().to_string());
+            let mut count = plural(images, "photo", "photos");
+            if hidden > 0 {
+                count.push_str(&format!(" · {hidden} hidden"));
+            }
+            ui.label(egui::RichText::new(count).small().weak());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // File types: raw is fixed on (the app is for raw files); the others are opt-in.
+                ui.toggle_value(
+                    &mut self.browser_filter.jpegs,
+                    egui::RichText::new("JPEG").small(),
+                )
+                .on_hover_text("Also list compressed JPEG files");
+                ui.toggle_value(
+                    &mut self.browser_filter.bitmaps,
+                    egui::RichText::new("TIFF/PNG").small(),
+                )
+                .on_hover_text(
+                    "Also list lossless bitmaps (TIFF, PNG), such as scans or edited masters",
+                );
+                ui.add_enabled(
+                    false,
+                    egui::Button::selectable(true, egui::RichText::new("RAW").small()),
+                )
+                .on_disabled_hover_text("Camera raw files (NEF, DNG, ARW) are always listed");
+            });
+        });
 
-        let thumbs_on = self.browser_thumbs;
-        egui::ScrollArea::vertical()
-            .auto_shrink(false)
+        let mut select = None;
+        let mut show_all = false;
+        let reveal = std::mem::take(&mut self.reveal_in_strip);
+        egui::ScrollArea::horizontal()
+            .auto_shrink([false, true])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = if thumbs_on { 2.0 } else { 0.0 };
-                let row_h = if thumbs_on {
-                    THUMB_ROW + 4.0
-                } else {
-                    ui.spacing().interact_size.y
-                };
-                let width = ui.available_width();
-                let padding = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
-                let button_font = egui::TextStyle::Button.resolve(ui.style());
-                let small_font = egui::TextStyle::Small.resolve(ui.style());
+                if images == 0 {
+                    ui.horizontal(|ui| {
+                        if hidden > 0 {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "No raw files here; {} hidden",
+                                    plural(hidden, "JPEG/TIFF/PNG file", "JPEG/TIFF/PNG files")
+                                ))
+                                .weak(),
+                            );
+                            show_all = ui
+                                .small_button("Show them")
+                                .on_hover_text("List JPEG, TIFF and PNG files too")
+                                .clicked();
+                        } else {
+                            ui.label(
+                                egui::RichText::new(
+                                    "No photos in this folder. Choose another on the left.",
+                                )
+                                .weak(),
+                            );
+                        }
+                    });
+                    return;
+                }
+                let tile_h = (ui.available_height() - 20.0).clamp(40.0, 220.0);
+                let size = Vec2::new(tile_h * 1.5, tile_h);
                 let ctx = ui.ctx().clone();
-                let measure = |text: &str, font: &egui::FontId| {
+                let small = egui::TextStyle::Small.resolve(ui.style());
+                let measure = |text: &str| {
                     ctx.fonts_mut(|f| {
-                        f.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+                        f.layout_no_wrap(text.to_owned(), small.clone(), Color32::WHITE)
                             .size()
                             .x
                     })
                 };
-                if images + folders == 0 {
-                    if hidden > 0 {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "No raw files here; {} hidden",
-                                plural(hidden, "JPEG/TIFF/PNG file", "JPEG/TIFF/PNG files")
-                            ))
-                            .weak(),
-                        );
-                        show_all = ui.small_button("Show them").clicked();
-                    } else {
-                        ui.label(egui::RichText::new("No folders or images here").weak());
-                    }
-                }
-                for entry in self.entries.iter().filter(|e| filter.shows(e.kind)) {
-                    if entry.is_dir {
-                        // Folders carry a "Folder" tag, like the file-type tags on images.
-                        let room = width - padding - measure("Folder", &small_font);
-                        let name = browser::middle_ellipsis(&entry.name, room, |t| {
-                            measure(t, &button_font)
+                let accent = Tokens::get(ui.ctx()).accent;
+                ui.horizontal(|ui| {
+                    for entry in self.entries.iter().filter(|e| filter.shows(e.kind)) {
+                        let selected = self.selected.as_ref() == Some(&entry.path);
+                        ui.vertical(|ui| {
+                            ui.set_width(size.x);
+                            let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                            match self.thumbs.get(&entry.path) {
+                                Some(tex) => {
+                                    // Fit inside the tile, keeping the photo's shape.
+                                    let t = tex.size_vec2();
+                                    let scale = (size.x / t.x).min(size.y / t.y);
+                                    let shown =
+                                        egui::Rect::from_center_size(rect.center(), t * scale);
+                                    egui::Image::new(tex).paint_at(ui, shown);
+                                }
+                                None => {
+                                    ui.put(rect, egui::Spinner::new());
+                                }
+                            }
+                            if selected {
+                                ui.painter().rect_stroke(
+                                    rect.expand(2.0),
+                                    2.0,
+                                    Stroke::new(2.0, accent),
+                                    egui::StrokeKind::Outside,
+                                );
+                                if reveal {
+                                    response.scroll_to_me(None);
+                                }
+                            } else if response.hovered() {
+                                ui.painter().rect_stroke(
+                                    rect.expand(1.0),
+                                    2.0,
+                                    Stroke::new(1.0, ui.visuals().weak_text_color()),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+                            let name = browser::middle_ellipsis(&entry.name, size.x, measure);
+                            let text = egui::RichText::new(name).small();
+                            ui.add(
+                                egui::Label::new(if selected { text.strong() } else { text })
+                                    .truncate(),
+                            );
+                            let response = response.on_hover_text(format!(
+                                "{} ({})\nClick to open it in the main view.",
+                                entry.name,
+                                browser::type_tag(&entry.path)
+                            ));
+                            if response.clicked() {
+                                select = Some(entry.path.clone());
+                            }
                         });
-                        let response = ui
-                            .add(
-                                egui::Button::selectable(false, name)
-                                    .right_text(egui::RichText::new("Folder").small().weak())
-                                    .truncate()
-                                    .min_size(Vec2::new(width, row_h)),
-                            )
-                            .on_hover_text(format!("Open folder “{}”", entry.name));
-                        if response.clicked() {
-                            open = Some(entry.path.clone());
-                        }
-                        continue;
                     }
-                    let selected = self.selected.as_ref() == Some(&entry.path);
-                    let tag = browser::type_tag(&entry.path);
-                    let thumb = self.thumbs.get(&entry.path);
-                    // Thumbnail plus the button's gap before the text, when shown.
-                    let thumb_w = if thumbs_on && thumb.is_some() {
-                        THUMB_ROW + ui.spacing().icon_spacing
-                    } else {
-                        0.0
-                    };
-                    let room = width - padding - thumb_w - measure(&tag, &small_font);
-                    let name =
-                        browser::middle_ellipsis(&entry.name, room, |t| measure(t, &button_font));
-                    let button = match (thumbs_on, thumb) {
-                        (true, Some(tex)) => egui::Button::selectable(
-                            selected,
-                            (
-                                egui::Image::new(tex)
-                                    .fit_to_exact_size(Vec2::splat(THUMB_ROW))
-                                    .maintain_aspect_ratio(true),
-                                name,
-                            ),
-                        ),
-                        _ => egui::Button::selectable(selected, name),
-                    }
-                    .right_text(egui::RichText::new(&tag).small().weak())
-                    .truncate()
-                    .min_size(Vec2::new(width, row_h));
-                    let response = ui.add(button).on_hover_ui(|ui| {
-                        if let Some(tex) = thumb {
-                            ui.add(egui::Image::new(tex).max_size(Vec2::splat(200.0)));
-                        }
-                        ui.label(&entry.name);
-                    });
-                    if response.clicked() {
-                        select = Some(entry.path.clone());
-                    }
-                }
+                });
             });
         if show_all {
             self.browser_filter = browser::Filter {
                 bitmaps: true,
                 jpegs: true,
             };
-        }
-        if let Some(folder) = open {
-            self.open_folder(folder);
         }
         if let Some(path) = select {
             self.select_image(path);
@@ -2072,6 +2084,15 @@ impl App {
     fn gallery(&mut self, ui: &mut egui::Ui) {
         let mut pick = None;
         let mut menu_action = None;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Styles").strong())
+                .on_hover_text("The photo above rendered in every style. Click one to use it.");
+            ui.label(
+                egui::RichText::new("this photo in every style")
+                    .small()
+                    .weak(),
+            );
+        });
         egui::ScrollArea::horizontal()
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -2190,7 +2211,10 @@ impl App {
                     ui.spinner();
                 } else {
                     ui.label(
-                        egui::RichText::new("Choose an image from the folder on the left").weak(),
+                        egui::RichText::new(
+                            "Choose a folder on the left, then a photo from the strip below",
+                        )
+                        .weak(),
                     );
                 }
             });
@@ -2277,12 +2301,19 @@ impl eframe::App for App {
                 if i.key_pressed(egui::Key::G) {
                     self.show_gallery = !self.show_gallery;
                 }
+                if i.key_pressed(egui::Key::I) {
+                    self.show_filmstrip = !self.show_filmstrip;
+                }
                 if i.key_pressed(egui::Key::F) {
                     // Focus mode: hide everything, or bring everything back.
-                    let any = self.show_browser || self.show_styles || self.show_gallery;
+                    let any = self.show_browser
+                        || self.show_styles
+                        || self.show_gallery
+                        || self.show_filmstrip;
                     self.show_browser = !any;
                     self.show_styles = !any;
                     self.show_gallery = !any;
+                    self.show_filmstrip = !any;
                 }
                 (
                     i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown),
@@ -2311,14 +2342,13 @@ impl eframe::App for App {
         egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
         let mut show_browser = self.show_browser;
         let panel_frame =
-            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(12, 8));
-        // New id: the compact list starts at its narrower default instead of a width
-        // saved for the old thumbnail list.
-        egui::Panel::left("files")
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(0, 4));
+        // New id: the folder tree starts at its own default width, not the file list's.
+        egui::Panel::left("folders")
             .frame(panel_frame)
             .resizable(true)
-            .default_size(170.0)
-            .size_range(120.0..=360.0)
+            .default_size(220.0)
+            .size_range(160.0..=420.0)
             .show_collapsible(ui, &mut show_browser, |ui| self.browser_panel(ui));
         self.show_browser = show_browser;
         let tokens = Tokens::get(ctx);
@@ -2343,6 +2373,14 @@ impl eframe::App for App {
                 Module::Styles => self.styles_panel(ui),
             });
         self.show_styles = show_styles;
+        // The image strip sits at the very bottom, the style gallery above it.
+        let mut show_filmstrip = self.show_filmstrip;
+        egui::Panel::bottom("filmstrip")
+            .resizable(true)
+            .default_size(160.0)
+            .size_range(90.0..=280.0)
+            .show_collapsible(ui, &mut show_filmstrip, |ui| self.filmstrip(ui));
+        self.show_filmstrip = show_filmstrip;
         let mut show_gallery = self.show_gallery;
         egui::Panel::bottom("gallery")
             .resizable(true)
@@ -2494,10 +2532,6 @@ impl eframe::App for App {
             egui::ThemePreference::System => "system",
         };
         storage.set_string(KEY_THEME, theme.into());
-        storage.set_string(
-            KEY_BROWSER_THUMBS,
-            if self.browser_thumbs { "1" } else { "0" }.into(),
-        );
         let flag_str = |b: bool| if b { "1" } else { "0" }.to_string();
         storage.set_string(KEY_BROWSER_BITMAPS, flag_str(self.browser_filter.bitmaps));
         storage.set_string(KEY_UPDATE_AUTO, flag_str(self.update_auto));
@@ -2510,10 +2544,15 @@ impl eframe::App for App {
         let flag = |b: bool| if b { '1' } else { '0' };
         storage.set_string(
             KEY_PANELS,
-            [self.show_browser, self.show_styles, self.show_gallery]
-                .map(flag)
-                .iter()
-                .collect(),
+            [
+                self.show_browser,
+                self.show_styles,
+                self.show_gallery,
+                self.show_filmstrip,
+            ]
+            .map(flag)
+            .iter()
+            .collect(),
         );
         if let Ok(json) = serde_json::to_string(&self.export) {
             storage.set_string(KEY_EXPORT, json);
