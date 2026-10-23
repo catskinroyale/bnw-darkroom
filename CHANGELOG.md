@@ -5,6 +5,9 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The README screenshot shows the 0.7 interface.
+
 ## [0.7.1] - 2026-10-23
 
 ### Added
