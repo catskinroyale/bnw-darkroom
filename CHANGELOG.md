@@ -5,6 +5,10 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- The README showed an out-of-date screenshot: GitHub and browsers kept a cached copy
+  of the reused file name. Each release's screenshot now has its own name.
+
 ## [0.10.0] - 2026-10-23
 
 ### Changed

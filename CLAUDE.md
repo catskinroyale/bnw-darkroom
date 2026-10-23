@@ -85,8 +85,10 @@ others may never repaint. Scripted clicks can rename/delete real user styles
   (`.claude/hooks/require-changelog.sh`) blocks `git push` otherwise; edit the changelog in
   a separate command before the push command.
 - End commit messages with the attribution line the session provides.
-- **Every release refreshes the README first** (the user's standing request): retake
-  `docs/images/screenshot.jpg` showing the current interface and update the README text
+- **Every release refreshes the README first** (the user's standing request): retake the
+  screenshot as `docs/images/screenshot-X.Y.Z.jpg` (a new name per release: GitHub's image
+  proxy and browsers cache a reused name, so the README kept showing an old picture),
+  `git rm` the previous one and point the README at the new file, showing the current interface and update the README text
   and image alt text to match, committed before `tools/release.sh`. Take the shot with
   `HOME` set to a scratch folder holding only an approved photo (e.g.
   `Pictures/Darkroom/DSC_6438.NEF` plus neutral empty folders) so the folder tree shows
