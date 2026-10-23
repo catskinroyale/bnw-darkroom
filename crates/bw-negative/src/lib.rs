@@ -62,6 +62,10 @@ pub struct RenderOptions {
     pub seed: u64,
     pub geometry: FilmGeometry,
     pub grain: GrainAdjust,
+    /// Where this image's top-left pixel sits in the full frame, in pixels. Grain is keyed
+    /// on full-frame coordinates, so a crop rendered with its origin has exactly the grain
+    /// of that region of the whole frame (and panning a crop moves the grain with it).
+    pub grain_origin: [u32; 2],
 }
 
 /// Creative adjustments to the film's grain. The default leaves the grain exactly as the
@@ -208,6 +212,7 @@ pub fn develop(
         options.seed,
         &geometry,
         &options.grain,
+        options.grain_origin,
     );
 
     let base = film.base_density as f32;
@@ -246,12 +251,14 @@ fn apply_grain(
     seed: u64,
     geometry: &FilmGeometry,
     adjust: &GrainAdjust,
+    origin: [u32; 2],
 ) {
     let (w, h) = (net.width(), net.height());
     let film_sigma = geometry.um_to_px(clump_um);
     let mut field = grain_field(
         w,
         h,
+        origin,
         seed,
         0,
         film_sigma * adjust.size.max(0.05),
@@ -263,6 +270,7 @@ fn apply_grain(
         let other = grain_field(
             w,
             h,
+            origin,
             seed,
             1,
             film_sigma * adjust.size.max(0.05) * 2.0,
@@ -312,19 +320,37 @@ fn std_dev(p: &Plane) -> f64 {
 
 /// White noise blurred to `sigma_px`, scaled to the per-pixel strength it would have at
 /// `film_sigma_px`, so changing the clump size changes coarseness, not strength.
+///
+/// The noise is keyed on full-frame coordinates (`origin` plus the pixel position) and
+/// generated with a margin wide enough for the blur, then cropped: the field for any
+/// region equals that region of the whole frame's field.
 fn grain_field(
     w: usize,
     h: usize,
+    origin: [u32; 2],
     seed: u64,
     stream: u32,
     sigma_px: f64,
     film_sigma_px: f64,
 ) -> Plane {
-    let white = Plane::from_fn(w, h, |x, y| {
-        noise::gaussian(seed, stream, x as u32, y as u32)
+    let margin = blur::gaussian_kernel(sigma_px).len() / 2;
+    let (mw, mh) = (w + 2 * margin, h + 2 * margin);
+    let (ox, oy) = (
+        origin[0].wrapping_sub(margin as u32),
+        origin[1].wrapping_sub(margin as u32),
+    );
+    let white = Plane::from_fn(mw, mh, |x, y| {
+        noise::gaussian(
+            seed,
+            stream,
+            ox.wrapping_add(x as u32),
+            oy.wrapping_add(y as u32),
+        )
     })
     .expect("dimensions come from an existing plane");
-    let mut field = blur::gaussian_blur(&white, sigma_px);
+    let wide = blur::gaussian_blur(&white, sigma_px);
+    let mut field = Plane::from_fn(w, h, |x, y| wide.get(x + margin, y + margin))
+        .expect("dimensions come from an existing plane");
     if sigma_px != film_sigma_px {
         let gain = (blur::variance_factor_2d(film_sigma_px) / blur::variance_factor_2d(sigma_px))
             .sqrt() as f32;
@@ -381,6 +407,7 @@ mod tests {
             seed: 11,
             geometry: FilmGeometry::full_frame_35mm(200, 120).unwrap(),
             grain: GrainAdjust::default(),
+            grain_origin: [0, 0],
         };
         let run = |threads| {
             rayon::ThreadPoolBuilder::new()
@@ -414,6 +441,7 @@ mod tests {
             5,
             &geometry,
             &GrainAdjust::default(),
+            [0, 0],
         );
         // Box aperture with the same area as a 48 µm circle.
         let side_px = ((bw_film::GrainParams::APERTURE_48_UM2).sqrt() / 4.0).round() as usize;
@@ -439,6 +467,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_crops_grain_is_that_region_of_the_whole_frame() {
+        // Panning the Detail view must move the grain with the image: a crop rendered at
+        // its origin has the same grain as that region of the full frame.
+        for sigma in [0.4, 1.5, 3.0] {
+            let full = grain_field(160, 120, [0, 0], 9, 0, sigma, sigma);
+            let (x0, y0) = (37usize, 21usize);
+            let crop = grain_field(50, 40, [x0 as u32, y0 as u32], 9, 0, sigma, sigma);
+            for y in 0..40 {
+                for x in 0..50 {
+                    let (a, b) = (crop.get(x, y), full.get(x + x0, y + y0));
+                    assert!((a - b).abs() < 1e-5, "σ {sigma}: ({x},{y}) {a} vs {b}");
+                }
+            }
+        }
+    }
+
     /// Per-pixel grain standard deviation on a uniform field at net D = 1.
     fn pixel_grain_std(adjust: GrainAdjust) -> f64 {
         let (film, _, _) = setup();
@@ -452,6 +497,7 @@ mod tests {
             5,
             &geometry,
             &adjust,
+            [0, 0],
         );
         let v: Vec<f64> = net.data().iter().map(|&d| f64::from(d)).collect();
         let mean = v.iter().sum::<f64>() / v.len() as f64;

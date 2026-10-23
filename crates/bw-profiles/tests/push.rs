@@ -75,3 +75,28 @@ fn pull_holds_blacks_and_softens_contrast() {
     assert!((pulled[0] - normal[0]).abs() < 0.03);
     assert!(pulled[3] > normal[3] && pulled[7] > normal[7]);
 }
+
+#[test]
+fn overlapping_crops_show_the_same_grain() {
+    // The Detail view renders crops at their place in the frame; panning must move the
+    // grain with the image, so two overlapping crops agree where they overlap.
+    use bw_profiles::render_region;
+    let style = builtin_styles()[0].clone();
+    let frame_px = 1000.0;
+    let crop = |size: usize| SceneImage::Mono {
+        y: Plane::filled(size, size, 0.18).unwrap(),
+    };
+    let mm = |size: usize| style.frame_width_mm() * size as f64 / frame_px;
+    let a = render_region(&crop(120), &style, mm(120), [200, 300])
+        .unwrap()
+        .print;
+    let b = render_region(&crop(120), &style, mm(120), [240, 330])
+        .unwrap()
+        .print;
+    for y in 0..90 {
+        for x in 0..80 {
+            let (pa, pb) = (a.get(x + 40, y + 30), b.get(x, y));
+            assert!((pa - pb).abs() < 1e-6, "({x},{y}) {pa} vs {pb}");
+        }
+    }
+}

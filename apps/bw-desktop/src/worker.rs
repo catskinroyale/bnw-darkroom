@@ -290,9 +290,11 @@ pub fn spawn_renderer(rx: Receiver<Job>, tx: Sender<Msg>, ctx: egui::Context) {
                         (y + ch) as f32 / h as f32,
                     ];
                     // The crop spans its share of the frame, so grain and edge effects
-                    // are rendered at the full-resolution scale.
+                    // are rendered at the full-resolution scale, and its grain is keyed on
+                    // its place in the frame: the export's grain, moving with the image.
                     let crop_mm = style.frame_width_mm() * crop.dimensions().0 as f64 / w as f64;
-                    match bw_profiles::render(&crop, &style, crop_mm) {
+                    let origin = [x as u32, y as u32];
+                    match bw_profiles::render_region(&crop, &style, crop_mm, origin) {
                         Ok(r) => Msg::Detail {
                             generation,
                             image: gray_image(&r.print),

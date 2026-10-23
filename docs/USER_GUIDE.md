@@ -228,7 +228,8 @@ Grain and edge effects only show properly at full resolution. Press **D** (or ti
 **Detail 1:1**) and click the image to choose the area. An orange outline shows what the
 Detail window displays.
 
-- **100%** shows one image pixel per screen pixel: the export at full size.
+- **100%** shows one image pixel per screen pixel: the export at full size, with
+  exactly the grain the export will have.
 - **200%** magnifies two times, for judging grain structure.
 
 The Detail window updates first whenever you change a setting, so you can fine-tune

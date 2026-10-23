@@ -328,6 +328,18 @@ pub fn render(
     style: &Style,
     frame_width_mm: f64,
 ) -> Result<Rendered, StyleError> {
+    render_region(scene, style, frame_width_mm, [0, 0])
+}
+
+/// Render a crop of a larger frame whose top-left pixel is at `origin` in that frame (at
+/// the same resolution). Its grain is exactly that region's grain in the whole frame, so
+/// a 1:1 detail view matches the full-size export and moves with the image when panned.
+pub fn render_region(
+    scene: &SceneImage,
+    style: &Style,
+    frame_width_mm: f64,
+    origin: [u32; 2],
+) -> Result<Rendered, StyleError> {
     let (w, h) = scene.dimensions();
     let geometry = FilmGeometry::from_frame_width(frame_width_mm, w, h)?;
     let (film, calibration) = style.combination()?;
@@ -341,6 +353,7 @@ pub fn render(
         seed: style.seed,
         geometry,
         grain: style.grain.adjust(),
+        grain_origin: origin,
     };
     let negative = develop(
         scene,

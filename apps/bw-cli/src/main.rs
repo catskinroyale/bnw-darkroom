@@ -202,6 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     seed,
                     geometry,
                     grain: Default::default(),
+                    grain_origin: [0, 0],
                 };
                 let start = std::time::Instant::now();
                 let negative = develop(

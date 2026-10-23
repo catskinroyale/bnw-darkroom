@@ -5,6 +5,16 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `CLAUDE.md`: working notes for AI-assisted development (layout, commands, model
+  decisions to keep, UI conventions, screenshot-test hooks, release steps).
+
+### Fixed
+- **Grain now moves with the image in the Detail window.** It used to be generated
+  relative to the visible crop, so dragging the view re-rolled the pattern in place. Grain
+  is now tied to each pixel's position in the whole frame. The Detail view therefore shows
+  exactly the grain of the full-size export, and it stays aligned as you drag.
+
 ## [0.7.0] - 2026-10-22
 
 ### Changed
