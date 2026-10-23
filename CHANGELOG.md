@@ -5,6 +5,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-23
+
 ### Changed
 - **The style gallery is a column on the left**, beside the folder tree, so larger
   previews no longer take height from the photo. Previews are twice their earlier size,
@@ -338,7 +340,8 @@ All notable changes to this project are recorded here. The format follows
   workflow views with hover help, push/pull in stops, grain from format and enlargement,
   1:1 detail view, full-resolution TIFF export.
 
-[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/catskinroyale/bnw-darkroom/compare/v0.7.0...v0.7.1
